@@ -399,39 +399,49 @@ async def index_page(request: Request):
 
 # ===================== Video Streaming Routes =====================
 
-def mjpeg_generator(camera_id: str):
-    """MJPEG stream frame generator for a specific camera."""
+async def mjpeg_generator(camera_id: str, request: Optional[Request] = None):
+    """Async MJPEG stream frame generator for a specific camera.
+
+    Runs on the event loop (no worker thread is held per viewer) and terminates
+    when the camera is removed or the client disconnects.
+    """
+    last_sent: Optional[bytes] = None
     while True:
+        if request is not None and await request.is_disconnected():
+            break
         cam = camera_manager.get_camera(camera_id)
-        if cam is not None:
-            jpeg_bytes = cam.get_latest_jpeg()
-            if jpeg_bytes:
-                yield (
-                    b"--frame\r\n"
-                    b"Content-Type: image/jpeg\r\n\r\n" + jpeg_bytes + b"\r\n"
-                )
-        time.sleep(0.04)  # ~25 FPS stream rate
+        if cam is None:
+            break
+        jpeg_bytes = cam.get_latest_jpeg()
+        if jpeg_bytes and jpeg_bytes is not last_sent:
+            last_sent = jpeg_bytes
+            yield (
+                b"--frame\r\n"
+                b"Content-Type: image/jpeg\r\n\r\n" + jpeg_bytes + b"\r\n"
+            )
+        await asyncio.sleep(0.04)  # ~25 FPS stream rate
 
 
 @app.get("/api/cameras/{cam_id}/feed")
-async def camera_feed(cam_id: str):
+async def camera_feed(cam_id: str, request: Request):
     """Streams MJPEG video feed for the specified camera."""
     cam = camera_manager.get_camera(cam_id)
     if not cam:
         raise HTTPException(status_code=404, detail=f"Camera '{cam_id}' not found")
     return StreamingResponse(
-        mjpeg_generator(cam_id),
+        mjpeg_generator(cam_id, request),
         media_type="multipart/x-mixed-replace; boundary=frame"
     )
 
 
 @app.get("/video_feed")
-async def default_video_feed():
+async def default_video_feed(request: Request):
     """Default fallback video feed routing to the first available camera."""
     cameras = camera_manager.get_all_cameras()
-    cam_id = cameras[0].camera_id if cameras else "cam_main"
+    if not cameras:
+        raise HTTPException(status_code=404, detail="No camera registered")
     return StreamingResponse(
-        mjpeg_generator(cam_id),
+        mjpeg_generator(cameras[0].camera_id, request),
         media_type="multipart/x-mixed-replace; boundary=frame"
     )
 
