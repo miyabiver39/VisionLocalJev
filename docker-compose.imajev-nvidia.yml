@@ -1,0 +1,42 @@
+# imajev を NVIDIA GPU で起動し、アプリの判定エンジンに接続する (社内の H100 などを想定)。
+# 前提: NVIDIA ドライバ 580 以降 (CUDA 13.0) と NVIDIA Container Toolkit (Docker Desktop の場合は GPU サポート有効)。
+#
+#   docker compose -f docker-compose.yml -f docker-compose.imajev-nvidia.yml up -d --build
+#
+# 注意: この構成はビルドのみ確認済みで、NVIDIA GPU 上での実行は未検証。
+services:
+  imajev:
+    build:
+      context: .
+      dockerfile: docker/imajev/Dockerfile.cuda
+    image: visionlocaljev-imajev:cuda
+    container_name: vision-guard-imajev
+    restart: unless-stopped
+    environment:
+      - IMAJEV_SIZE=${IMAJEV_SIZE:-4b}              # 2b | 4b | 9b (約 19GB)
+      - IMAJEV_ROTATIONS=${IMAJEV_ROTATIONS:-1}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    volumes:
+      - imajev-data:/data
+    ports:
+      - "127.0.0.1:${IMAJEV_PORT:-8765}:8765"
+
+  vision-guard:
+    environment:
+      - DJEV_MODE=remote
+      - DJEV_SERVER_URL=http://imajev:8765/v1/systemone
+      - DJEV_MODEL=imajev-${IMAJEV_SIZE:-4b}
+      - DJEV_IMAGE_MODE=images
+      - DJEV_TIMEOUT=${DJEV_TIMEOUT:-30}
+    depends_on:
+      imajev:
+        condition: service_healthy
+
+volumes:
+  imajev-data:
