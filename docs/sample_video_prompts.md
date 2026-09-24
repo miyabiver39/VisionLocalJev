@@ -131,15 +131,16 @@ Authentic Japanese surveillance camera footage set in Japan. Realistic Japanese 
 
 ユーザー様により YouTube へアップロードされた検証用動画一覧です。WebUIの「カメラ追加」モーダルからワンクリックで自動入力・即時監視可能です：
 
-| # | YouTube URL | 対象ドメインプリセット | 概要 |
-|---|---|---|---|
-| **#1** | [`https://www.youtube.com/watch?v=IS98_Tzwl3c`](https://www.youtube.com/watch?v=IS98_Tzwl3c) | `security` (防犯・立ち入り) | 不審者徘徊・侵入検知 |
-| **#2** | [`https://www.youtube.com/watch?v=NKHab4poTok`](https://www.youtube.com/watch?v=NKHab4poTok) | `fire_disaster` (火災・防災) | 電気室黒煙・火炎検知 |
-| **#3** | [`https://www.youtube.com/watch?v=lYqbEQ93RBw`](https://www.youtube.com/watch?v=lYqbEQ93RBw) | `nursing_care` (介護見守り) | ベッドサイド高齢者転倒 |
-| **#4** | [`https://www.youtube.com/watch?v=CRwce8_7t_o`](https://www.youtube.com/watch?v=CRwce8_7t_o) | `river_flood` (河川水害) | 増水・高水位危険標検知 |
-| **#5** | [`https://www.youtube.com/watch?v=DW0F_5YUEVs`](https://www.youtube.com/watch?v=DW0F_5YUEVs) | `factory_safety` (工場労働安全) | 危険域進入・作業員倒臥 |
-| **#6** | [`https://www.youtube.com/watch?v=Q3Aj3ynUyk0`](https://www.youtube.com/watch?v=Q3Aj3ynUyk0) | `railway_platform` (駅ホーム鉄道安全) | ホーム端から線路への転落 |
-| **#7** | [`https://www.youtube.com/watch?v=hC214WzegXw`](https://www.youtube.com/watch?v=hC214WzegXw) | `security` (防犯・外周フェンス) | 夜間フェンス乗り越え |
+| # | YouTube URL | 対象ドメインプリセット | シーン | 概要 |
+|---|---|---|---|---|
+| **#1** | [`https://www.youtube.com/watch?v=IS98_Tzwl3c`](https://www.youtube.com/watch?v=IS98_Tzwl3c) | `nursing_care` (介護見守り) | 🚨 検知 | 高齢者ベッドサイド転倒・床倒臥検知 |
+| **#2** | [`https://www.youtube.com/watch?v=NKHab4poTok`](https://www.youtube.com/watch?v=NKHab4poTok) | `nursing_care` (介護見守り) | ✅ 正常 | 施設居室内での安全・安静就寝 |
+| **#3** | [`https://www.youtube.com/watch?v=lYqbEQ93RBw`](https://www.youtube.com/watch?v=lYqbEQ93RBw) | `river_flood` (河川水害) | ✅ 正常 | 平常時清流・低水位・護岸安全 |
+| **#4** | [`https://www.youtube.com/watch?v=Me0r4uVQlD0`](https://www.youtube.com/watch?v=Me0r4uVQlD0) | `river_flood` (河川水害) | 🚨 検知 | 豪雨激流・高水位危険標到達検知 |
+| **#5** | [`https://www.youtube.com/watch?v=CRwce8_7t_o`](https://www.youtube.com/watch?v=CRwce8_7t_o) | `security` (防犯・立ち入り) | 🚨 検知 | 外周防護フェンス乗り越え侵入検知 |
+| **#6** | [`https://www.youtube.com/watch?v=hC214WzegXw`](https://www.youtube.com/watch?v=hC214WzegXw) | `security` (防犯・立ち入り) | ✅ 正常 | 通用口・正規ゲートからの正常歩行通過 |
+| **#7** | [`https://www.youtube.com/watch?v=DW0F_5YUEVs`](https://www.youtube.com/watch?v=DW0F_5YUEVs) | `fire_disaster` (火災・防災) | 🚨 検知 | 電気設備室の開放火炎・激しい黒煙噴出 |
+| **#8** | [`https://www.youtube.com/watch?v=Q3Aj3ynUyk0`](https://www.youtube.com/watch?v=Q3Aj3ynUyk0) | `fire_disaster` (火災・防災) | ✅ 正常 | 給湯室・ポット加熱等の安全な白煙/湯気 |
 
 > [!IMPORTANT]
 > **YouTubeの公開設定について**:
