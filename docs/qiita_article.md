@@ -217,43 +217,64 @@ def infer_djev_native(model, tokenizer, vision_encoder, frame_bgr, questions_jso
 
 製造現場において「この傷はOKかNGか」「この配管の錆は緊急か」といった判断をモデルの再学習（Fine-tuning）なしで行うために、**「Visual Few-Shot RAG（画像参照RAG）」**を拡張設計しました。
 
-### Visual RAG のシステム構成図
+### Visual RAG のシステム構成図 & 役割分担
+
+「**ベクトル検索は推論モデルが行うのか？**」という疑問がありますが、結論として**モデル自身はベクトル検索を行いません**。
+Visual RAGは、以下の3つの独立したコンポーネントが明確に役割分担して協調動作します：
 
 ```mermaid
-flowchart TD
-    subgraph Registration["1. 事前登録フェーズ (現場の良品・過去異常の登録)"]
-        NormalImgs["正常な設備・ライン写真 (5〜10枚)"]
-        AnomalyImgs["過去の異常事例写真 (油漏れ, 火花, 倒臥等)"]
-        DINOv2_Reg["DINOv2 / SigLIP Encoder\n(特徴量抽出・768次元)"]
-        VectorDB[("Visual Vector DB\n(ChromaDB / FAISS / Qdrant)\nメタデータ: {状態, SOP手順}")]
-        
-        NormalImgs & AnomalyImgs --> DINOv2_Reg --> VectorDB
-    end
+sequenceDiagram
+    autonumber
+    actor Camera as 監視カメラ
+    participant Extractor as 特徴抽出器<br/>(Spatial-HSV-HOG / 512-dim)
+    participant VectorDB as ベクトル検索DB<br/>(k-NN Cosine Index)
+    participant DJev as 意思決定エンジン<br/>(DiffusionGemma-Jev)
+    actor UI as 統合WebUI / 警備システム
 
-    subgraph Runtime_Inference["2. リアルタイム推論フェーズ (カメラ映像解析)"]
-        LiveFrame["カメラ現行フレーム"]
-        DINOv2_Live["DINOv2 Encoder (実測 12ms)"]
-        QueryVec["現行フレームのベクトル Q"]
-        
-        LiveFrame --> DINOv2_Live --> QueryVec
-        QueryVec -->|コサイン類似度 k-NN検索| VectorDB
-    end
-
-    subgraph RAG_Fusion["3. DJev マルチモーダルコンテキスト注入"]
-        Retrieved["検索結果 Top-1:\n・最も類似する過去事例画像\n・類似度スコア: 0.94\n・紐づく緊急SOP手順書"]
-        DJev_Prompt["DJev Decision Engine\n(In-Context Visual Prompting)"]
-        DecisionFinal["型安全 最終判定 & SOP表示"]
-        
-        VectorDB --> Retrieved --> DJev_Prompt
-        LiveFrame --> DJev_Prompt
-        DJev_Prompt --> DecisionFinal
-    end
+    Camera->>Extractor: 映像フレーム (OpenCV ndarray) 入力
+    Extractor->>Extractor: 512次元マルチスケール特徴量抽出 (1.8ms)
+    Extractor->>VectorDB: クエリベクトル Q (L2正規化済み)
+    
+    Note over VectorDB: モデル外部のk-NN探索エンジンが実行<br/>事前登録された正常・異常ベクトル群と内積計算
+    VectorDB->>VectorDB: コサイン類似度 & アノマリー距離算出
+    VectorDB-->>DJev: 検索結果コンテキスト注入:<br/>{最類似事例: "制御盤火災", 類似度: 98.1%, 異常度: 0.727, 推奨SOP: "sop_fire"}
+    
+    Camera->>DJev: 画像テンソル直接入力 (SigLIPパッチ)
+    
+    Note over DJev: 外部ベクトル検索の結果を「文脈条件」として受領<br/>非自己回帰 離散拡散 (t=8→0) で一括デノイズ
+    DJev->>DJev: Choice / Urgency Score / Noul 一括確定 (0.79ms)
+    DJev-->>UI: 型安全判定JSON + Visual RAG照合結果 + 推奨SOP
 ```
 
-### なぜDINOv2を使った画像RAGが強力なのか？
-1. **学習不要（Zero-Shot / Few-Shot）**: 現場の作業員や管理者が「スマホや監視カメラで異常写真を1枚撮ってアップロードするだけ」で、即座に新しい検知対象として機能します。
-2. **正常ベースライン距離によるアノマリー検知**: 登録された「正常画像群」とのコサイン距離を測るだけで、未知の異常（見たこともない部品脱落など）を「正常からの乖離」として即座に検知できます。
-3. **超高速**: DINOv2-Small や SigLIP-Base はCPUでも10〜15ms程度でベクトル化が完了するため、エッジ監視のパイプラインにそのまま組み込めます。
+### 誰が何を担当しているのか？
+
+1. **① 特徴抽出器 (Feature Extractor)**:
+   - 入力画像フレーム（$H \times W \times C$）を受け取り、固定次元の特徴ベクトル（本システムでは 512次元）を抽出。
+   - モデルを巨大にせずとも、CPUで 1〜2ms で動く「空間グリッドHSV色相分布(192) ＋ Sobel HOGエッジ勾配(160) ＋ テクスチャ分散(160)」を抽出・L2正規化。
+2. **② ベクトル類似度検索エンジン (Visual Vector DB / k-NN Index)**:
+   - **推論モデルの外部**に存在する高速な検索エンジン（NumPy / FAISS / ScaNN）。
+   - 事前に登録されている「過去の正常事例ベクトル群」および「過去の異常事故ベクトル群」との**コサイン類似度（内積）**を瞬時に全探索（$<1\text{ms}$）。
+   - 最も似ている過去事例のメタデータ（タイトル、過去の重大事故事例ID、紐づく緊急対応SOP ID、サムネイル）と「アノマリー距離（Anomaly Score: 0.0〜1.0）」を出力。
+3. **③ 意思決定エンジン (DiffusionGemma-Jev / DJev)**:
+   - モデル自身は重いベクトル探索を行わず、**「検索エンジンから返された検索結果（リファレンス文脈）」をIn-Context条件として受け取ります**。
+   - カメラ画像テンソル ＋ 設問スキーマ ＋ Visual RAGの検索結果（「過去の火災事例と98.1%一致、異常度0.727」）を融合し、8ステップの離散拡散で「Choice: open_flame」「Urgency: 0.96」「Noul: true (即時避難)」を一括デノイズ確定します。
+
+### なぜこのハイブリッド構造が優れているのか？
+- **再学習ゼロ（Zero Fine-tuning）**: 現場の監視員がWebUIから「不審者写真」「油漏れ写真」をアップロードするだけで、即座にベクトルDBに登録され、次のフレームから検知可能になります。
+- **未知の異常（Out-of-Distribution）の検知**: 登録された「正常ベースライン群」との距離を測ることで、過去に見たことがない異常であっても「正常からの乖離」として即座にアラートをトリガーできます。
+- **超低遅延**: ベクトル検索は単純な内積計算（行列積）のため、CPUでも数万枚の登録画像をわずか数ミリ秒で走査可能です。
+
+---
+
+## PoC現場で必須となる「シナリオ固定モード（Freeze Mode）」
+
+PoCや実機検証の際、「テスト用シナリオを注入してアラートが鳴っても、次のフレームでカメラの通常映像に戻ってしまい、画面で確認できない」という運用上の大きな課題が発生します。
+
+本システムでは、クイック検証時に**20秒間の「シナリオ固定モード（Scenario Freeze）」**を標準搭載しました：
+
+- シナリオ注入ボタンを押すと、即座に推論パイプラインのステートが指定シナリオで固定され、アラートバナー・SOP手順・DJevデノイズ結果・WebHook送信が持続。
+- UI上に「⚡ テストシナリオ固定中（残りX秒）」のカウントダウンが表示され、判定結果をじっくり精査可能。
+- 画面上の「▶ 今すぐライブ監視に戻す」ボタンをクリックすると、即座に通常カメラ監視へ復帰。
 
 ---
 
@@ -310,5 +331,5 @@ Googleの最新アプローチである **DiffusionGemma-Jev (DJev)** を採用�
 
 本システムのソースコードはMITライセンスでGitHubにて公開しています。
 
-- **GitHub Repository**: `https://github.com/your-username/Vision-Jev-Guard`
+- **GitHub Repository**: `https://github.com/miyabiver39/VisionLocalJev` (Private)
 - **ライセンス**: MIT License
