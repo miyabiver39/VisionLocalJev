@@ -1,0 +1,20 @@
+id: "factory_safety"
+name: "工場・労働安全監視"
+description: "保護具（ヘルメット）未着用、重機旋回域危険進入、作業員倒臥の検知"
+questions:
+  - id: "safety_incident"
+    type: "choice"
+    label: "安全状態・労災種別"
+    choices:
+      - "safe_operation"     # 安全作業・正常動線
+      - "ppe_missing"        # 保護具・ヘルメット未着用
+      - "danger_zone_entry"  # 重機稼働域・立入禁止進入
+      - "worker_down"        # 作業員倒臥・意識不明
+  - id: "incident_hazard"
+    type: "score"
+    label: "労災リスクスコア"
+    rubric: "Rate industrial hazard level from 0.0 (full compliant safety) to 1.0 (worker trapped or collapsed)."
+  - id: "emergency_stop"
+    type: "noul"
+    label: "設備停止・救護要請"
+    hypothesis: "Critical industrial accident or severe intrusion requiring immediate machine cutoff."

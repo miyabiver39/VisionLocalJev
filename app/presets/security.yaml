@@ -1,0 +1,20 @@
+id: "security"
+name: "防犯・立ち入り監視"
+description: "不審行動、滞留、侵入、不審物放置の監視および脅威度判定"
+questions:
+  - id: "action_type"
+    type: "choice"
+    label: "行動種別"
+    choices:
+      - "normal_passing"     # 正常通過
+      - "loitering"          # 徘徊・滞留
+      - "trespassing"        # 柵越え・侵入
+      - "unattended_object"  # 不審物放置
+  - id: "threat_score"
+    type: "score"
+    label: "脅威度スコア"
+    rubric: "Rate security risk from 0 (completely safe) to 1 (critical breach)."
+  - id: "requires_alert"
+    type: "noul"
+    label: "警報発報要請"
+    hypothesis: "Immediate security response or staff intervention is required."

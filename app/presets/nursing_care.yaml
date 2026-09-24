@@ -1,0 +1,20 @@
+id: "nursing_care"
+name: "介護施設・高齢者見守り"
+description: "転倒、ベッド離床、車椅子ずり落ち、夜間徘徊の検知とスタッフ駆けつけ判定"
+questions:
+  - id: "posture_event"
+    type: "choice"
+    label: "行動・姿勢状態"
+    choices:
+      - "normal_rest"        # 正常就寝・安静
+      - "sitting_up"          # 起き上がり・離床準備
+      - "wandering"           # 徘徊・歩行不安定
+      - "fall_detected"       # 転倒・床倒臥
+  - id: "care_urgency"
+    type: "score"
+    label: "介助緊急度"
+    rubric: "Rate immediate injury risk from 0.0 (safe resting) to 1.0 (hard fall or trauma)."
+  - id: "staff_dispatch"
+    type: "noul"
+    label: "スタッフ駆けつけ要請"
+    hypothesis: "Patient has fallen or is in acute distress requiring immediate bedside assistance."

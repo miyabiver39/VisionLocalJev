@@ -1,0 +1,566 @@
+<!DOCTYPE html>
+<html lang="ja" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vision-Jev Guard Platform | エッジ監視・マルチカメラ統合制御</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        slate: { 850: '#131b2b', 950: '#060a12' }
+                    },
+                    fontFamily: {
+                        mono: ['JetBrains Mono', 'ui-monospace', 'monospace'],
+                    }
+                }
+            }
+        }
+    </script>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen font-['Inter',sans-serif] selection:bg-indigo-500/30 selection:text-indigo-200">
+
+    <!-- Top Navigation & Performance Header -->
+    <header class="border-b border-slate-800/80 bg-slate-900/80 backdrop-blur-md sticky top-0 z-40">
+        <div class="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="h-16 flex items-center justify-between">
+                <!-- Brand & System Title -->
+                <div class="flex items-center gap-3">
+                    <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-indigo-600 via-indigo-500 to-cyan-400 flex items-center justify-center shadow-lg shadow-indigo-500/20">
+                        <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
+                        </svg>
+                    </div>
+                    <div>
+                        <div class="flex items-center gap-2">
+                            <span class="font-bold text-lg tracking-tight bg-gradient-to-r from-white via-slate-200 to-slate-400 bg-clip-text text-transparent">Vision-Jev Guard</span>
+                            <span class="px-2 py-0.5 text-[10px] font-bold rounded bg-purple-500/20 text-purple-300 border border-purple-500/30 uppercase flex items-center gap-1">
+                                <span class="w-1.5 h-1.5 rounded-full bg-purple-400 animate-pulse"></span>
+                                DiffusionGemma-Jev (DJev)
+                            </span>
+                        </div>
+                        <div class="text-[11px] text-slate-400">Multi-Camera Hub &bull; Multimodal Discrete Text Diffusion &bull; SOP RAG</div>
+                    </div>
+                </div>
+
+                <!-- Action Controls: Camera Add, WebHook, RAG, Layout -->
+                <div class="flex items-center gap-3">
+                    <button id="btn-open-add-cam" class="px-3 py-1.5 text-xs font-semibold rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white flex items-center gap-1.5 shadow-sm transition">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
+                        カメラ追加 (RTSP/JPEG)
+                    </button>
+                    <button id="btn-open-webhooks" class="px-3 py-1.5 text-xs font-medium rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 flex items-center gap-1.5 transition">
+                        <svg class="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                        WebHook連携
+                    </button>
+                    <button id="btn-open-rag" class="px-3 py-1.5 text-xs font-medium rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 flex items-center gap-1.5 transition">
+                        <svg class="w-4 h-4 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path></svg>
+                        SOP RAG
+                    </button>
+                    <button id="btn-open-visual-rag" class="px-3 py-1.5 text-xs font-medium rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 flex items-center gap-1.5 transition" title="画像そのものをベクトル登録・類似照合するVisual RAG">
+                        <svg class="w-4 h-4 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+                        画像RAG (Visual RAG)
+                    </button>
+                    <!-- Sensitivity Threshold Selector -->
+                    <div class="flex items-center bg-slate-900 border border-slate-800 rounded-lg px-2 py-1 text-xs text-slate-400 gap-1.5" title="アラートを発報する最小確信度/スコア">
+                        <span>感度閾値:</span>
+                        <select id="select-threshold" class="bg-slate-950 border border-slate-700 rounded px-1.5 py-0.5 text-slate-200 text-xs focus:outline-none cursor-pointer">
+                            <option value="0.75">75% (高感度)</option>
+                            <option value="0.80" selected>80% (標準)</option>
+                            <option value="0.85">85% (厳格)</option>
+                            <option value="0.90">90% (高精度)</option>
+                            <option value="0.95">95% (確実)</option>
+                        </select>
+                    </div>
+                    <!-- Grid Layout Switcher -->
+                    <div class="hidden sm:flex items-center bg-slate-900 border border-slate-800 rounded-lg p-0.5">
+                        <button class="px-2 py-1 text-xs font-mono rounded text-slate-400 hover:text-white" data-layout="1">1x1</button>
+                        <button class="px-2 py-1 text-xs font-mono rounded bg-slate-800 text-indigo-400 font-bold" data-layout="2">2x2</button>
+                        <button class="px-2 py-1 text-xs font-mono rounded text-slate-400 hover:text-white" data-layout="auto">AUTO</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Performance & Telemetry HUD Bar -->
+            <div class="grid grid-cols-2 sm:grid-cols-6 gap-3 py-2.5 border-t border-slate-800/60 text-xs font-mono">
+                <div class="flex items-center gap-2">
+                    <span class="text-slate-400">CPU:</span>
+                    <span id="metric-cpu" class="text-emerald-400 font-bold">--%</span>
+                    <div class="w-12 bg-slate-800 rounded-full h-1.5 overflow-hidden">
+                        <div id="metric-cpu-bar" class="bg-emerald-500 h-1.5 transition-all" style="width: 0%"></div>
+                    </div>
+                </div>
+                <div class="flex items-center gap-2">
+                    <span class="text-slate-400">MEM:</span>
+                    <span id="metric-mem" class="text-cyan-400 font-bold">-- MB</span>
+                </div>
+                <div class="flex items-center gap-2">
+                    <span class="text-slate-400">CAMERAS:</span>
+                    <span id="metric-cameras-count" class="text-slate-200 font-bold">1 ACTIVE</span>
+                </div>
+                <div class="flex items-center gap-2">
+                    <span class="text-slate-400">WS CLIENTS:</span>
+                    <span id="metric-ws-clients" class="text-indigo-400 font-bold">1</span>
+                </div>
+                <div class="flex items-center gap-2">
+                    <span class="text-slate-400">INFERENCE:</span>
+                    <span id="metric-latency" class="text-amber-400 font-bold">-- ms</span>
+                </div>
+                <div class="flex items-center justify-end gap-1.5">
+                    <span id="ws-pulse" class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                    <span id="ws-status-text" class="text-[11px] text-emerald-400 font-semibold">ONLINE</span>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Critical Alert Banner -->
+    <div id="alert-banner" class="hidden max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 mt-4 transition-all duration-300">
+        <div class="bg-red-950/90 border-2 border-red-600 rounded-xl p-4 shadow-2xl shadow-red-950/60 flex items-center justify-between animate-pulse">
+            <div class="flex items-center gap-3.5">
+                <div class="w-10 h-10 rounded-full bg-red-600/30 flex items-center justify-center text-red-400">
+                    <svg class="w-6 h-6 animate-bounce" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+                </div>
+                <div>
+                    <div class="text-red-300 font-bold text-base flex items-center gap-2">
+                        <span id="alert-camera-name" class="underline">Camera</span>
+                        <span>- INCIDENT ALERT TRIGGERED</span>
+                        <span class="px-2 py-0.5 text-[10px] bg-red-600 text-white rounded font-mono uppercase">CRITICAL</span>
+                    </div>
+                    <div id="alert-reason" class="text-red-200 text-sm mt-0.5">High threat score detected.</div>
+                </div>
+            </div>
+            <div class="flex items-center gap-3">
+                <span id="alert-sop-tag" class="px-2.5 py-1 text-xs rounded bg-red-900/60 border border-red-500 text-red-200 font-semibold">
+                    SOP Recommended
+                </span>
+                <span id="alert-time" class="text-xs text-red-300/80 font-mono">--:--:--</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Content Layout: Multi-Camera Grid (Left 8) + Focus Decision & SOP (Right 4) -->
+    <main class="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+            <!-- Left: Multi-Camera Surveillance Hub (8 cols) -->
+            <div class="lg:col-span-8 space-y-5">
+                <!-- Camera Grid Header -->
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center gap-2">
+                        <div class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping"></div>
+                        <h2 class="text-sm font-bold uppercase tracking-wider text-slate-200">Surveillance Camera Feeds</h2>
+                        <span id="active-cameras-badge" class="px-2 py-0.5 text-xs rounded bg-slate-800 text-slate-400 font-mono">1 stream</span>
+                    </div>
+                    <div class="text-xs text-slate-500">Zero-Latency Drop &bull; Best-Effort</div>
+                </div>
+
+                <!-- Dynamic Cameras Grid Container -->
+                <div id="cameras-grid" class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <!-- Cards will be dynamically injected or updated -->
+                </div>
+
+                <!-- Quick Test Scenario Injection (PoC & Verification) -->
+                <div class="bg-slate-900/40 border border-slate-800/80 rounded-xl p-4">
+                    <div class="flex items-center justify-between mb-2">
+                        <span class="text-xs font-semibold text-slate-400">クイック検証・シナリオ注入 (Manual Injection & SOP Trigger)</span>
+                        <span class="text-[11px] text-slate-500">API/UI連動テスト</span>
+                    </div>
+                    <div class="flex flex-wrap gap-2">
+                        <button data-test-scenario="A suspicious person in dark clothes is loitering near the fence looking around." data-preset="security"
+                                class="px-2.5 py-1 text-xs rounded bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 transition">
+                            🚨 不審者徘徊 (Security SOP)
+                        </button>
+                        <button data-test-scenario="A person is attempting to climb over the outer security barrier fence." data-preset="security"
+                                class="px-2.5 py-1 text-xs rounded bg-slate-800 hover:bg-slate-700 text-red-300 border border-slate-700 transition">
+                            ⛔ 柵越え侵入 (Critical Breach SOP)
+                        </button>
+                        <button data-test-scenario="Dense black smoke is rising rapidly from an electrical equipment cabinet." data-preset="fire_disaster"
+                                class="px-2.5 py-1 text-xs rounded bg-slate-800 hover:bg-slate-700 text-orange-300 border border-slate-700 transition">
+                            🔥 黒煙・火災 (Disaster Evacuate SOP)
+                        </button>
+                        <button data-test-scenario="An unattended black backpack has been left standing near the emergency exit door." data-preset="security"
+                                class="px-2.5 py-1 text-xs rounded bg-slate-800 hover:bg-slate-700 text-purple-300 border border-slate-700 transition">
+                            📦 不審物放置 (Unattended SOP)
+                        </button>
+                        <button data-test-scenario="An elderly patient has tripped and fallen onto the floor near the bedside, lying motionless." data-preset="nursing_care"
+                                class="px-2.5 py-1 text-xs rounded bg-slate-800 hover:bg-slate-700 text-rose-300 border border-slate-700 transition">
+                            🚑 高齢者転倒 (Care Call SOP)
+                        </button>
+                        <button data-test-scenario="River water has breached the embankment dyke causing rapid inundation with civilians stranded on a sandbar." data-preset="river_flood"
+                                class="px-2.5 py-1 text-xs rounded bg-slate-800 hover:bg-slate-700 text-blue-300 border border-slate-700 transition">
+                            🌊 越水・河川氾濫 (Flood Evac SOP)
+                        </button>
+                        <button data-test-scenario="A worker collapsed and is down unconscious inside the heavy machinery danger zone." data-preset="factory_safety"
+                                class="px-2.5 py-1 text-xs rounded bg-slate-800 hover:bg-slate-700 text-yellow-300 border border-slate-700 transition">
+                            ⚠️ 労災・倒臥 (E-Stop SOP)
+                        </button>
+                        <button data-test-scenario="A person has fallen onto active railway tracks beyond the yellow braille line." data-preset="railway_platform"
+                                class="px-2.5 py-1 text-xs rounded bg-slate-800 hover:bg-slate-700 text-pink-300 border border-slate-700 transition">
+                            🚉 線路転落 (Train Halt SOP)
+                        </button>
+                        <button data-test-scenario="A person in standard work attire is walking through the entrance corridor normally." data-preset="security"
+                                class="px-2.5 py-1 text-xs rounded bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-slate-700 transition">
+                            ✅ 正常通過 (Normal Passing)
+                        </button>
+                    </div>
+
+                    <!-- Active Scenario Freeze Banner -->
+                    <div id="scenario-freeze-banner" class="hidden mt-3 bg-amber-500/15 border border-amber-500/40 rounded-xl p-2.5 flex items-center justify-between transition-all">
+                        <div class="flex items-center gap-2.5">
+                            <span class="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse"></span>
+                            <span class="text-xs font-bold text-amber-300">⚡ テストシナリオ固定中</span>
+                            <span class="text-[11px] font-mono text-amber-200/90">残り <span id="freeze-countdown-val" class="font-bold text-amber-300 underline">20</span> 秒で通常監視に復帰</span>
+                        </div>
+                        <button id="btn-resume-live" onclick="resumeLiveMonitoring()" class="px-2.5 py-1 text-xs font-bold rounded bg-amber-500 hover:bg-amber-400 text-slate-950 flex items-center gap-1 shadow-sm transition">
+                            <span>▶ 今すぐライブ監視に戻す</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right: Jev Decision Core & RAG SOP Action Panel (4 cols) -->
+            <div class="lg:col-span-4 space-y-5">
+                
+                <!-- Focus Header -->
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center gap-2">
+                        <div class="w-2.5 h-2.5 rounded-full bg-indigo-500"></div>
+                        <h2 class="text-sm font-bold uppercase tracking-wider text-slate-200">Latest Decision &amp; SOP</h2>
+                    </div>
+                    <span id="focus-camera-tag" class="text-xs font-mono text-indigo-400 bg-indigo-500/10 px-2 py-0.5 rounded border border-indigo-500/20">CAM: PRIMARY</span>
+                </div>
+
+                <!-- DJev Multimodal Diffusion Status Card -->
+                <div class="bg-slate-900 border border-purple-500/30 rounded-xl p-3.5 shadow-sm space-y-2">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-2">
+                            <span class="w-2 h-2 rounded-full bg-purple-400 animate-pulse"></span>
+                            <span class="text-xs font-bold text-purple-300 uppercase tracking-wider">DJev Discrete Diffusion</span>
+                        </div>
+                        <span id="djev-model-tag" class="text-[10px] font-mono text-slate-400 bg-slate-950 px-2 py-0.5 rounded border border-slate-800">DiffusionGemma-26B-Jev</span>
+                    </div>
+                    <div class="grid grid-cols-3 gap-2 text-[11px] font-mono text-slate-300">
+                        <div class="bg-slate-950/70 p-1.5 rounded border border-slate-800/80">
+                            <div class="text-[9px] text-slate-500">STEPS (t=T&rarr;0)</div>
+                            <div id="djev-steps-val" class="font-bold text-purple-400">8 Steps</div>
+                        </div>
+                        <div class="bg-slate-950/70 p-1.5 rounded border border-slate-800/80">
+                            <div class="text-[9px] text-slate-500">ENTROPY</div>
+                            <div id="djev-entropy-val" class="font-bold text-cyan-400">0.042</div>
+                        </div>
+                        <div class="bg-slate-950/70 p-1.5 rounded border border-slate-800/80">
+                            <div class="text-[9px] text-slate-500">INPUT TENSOR</div>
+                            <div id="djev-multimodal-val" class="font-bold text-emerald-400">MULTIMODAL</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Visual Example RAG Status Card -->
+                <div class="bg-slate-900 border border-indigo-500/20 rounded-xl p-3.5 shadow-sm space-y-2.5">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-2">
+                            <span class="w-2 h-2 rounded-full bg-cyan-400"></span>
+                            <span class="text-xs font-bold text-cyan-300 uppercase tracking-wider">Visual RAG Reference</span>
+                        </div>
+                        <span id="visual-rag-sim-badge" class="text-[10px] font-mono text-cyan-300 bg-cyan-950 px-2 py-0.5 rounded border border-cyan-800">SIM: --%</span>
+                    </div>
+                    <div class="flex items-center gap-3">
+                        <div class="w-20 h-14 bg-slate-950 rounded-lg border border-slate-800 overflow-hidden flex-shrink-0 flex items-center justify-center">
+                            <img id="visual-rag-thumb" src="" alt="Reference Thumb" class="w-full h-full object-cover hidden">
+                            <span id="visual-rag-no-thumb" class="text-[9px] text-slate-600 font-mono text-center px-1">NO MATCH</span>
+                        </div>
+                        <div class="flex-1 min-w-0 space-y-1">
+                            <div id="visual-rag-title" class="text-xs font-semibold text-slate-200 truncate">登録リファレンス照合中...</div>
+                            <div class="flex items-center gap-2 text-[10px] font-mono text-slate-400">
+                                <span>異常度:</span>
+                                <span id="visual-rag-anomaly-score" class="font-bold text-emerald-400">0.00</span>
+                                <span id="visual-rag-status-tag" class="px-1.5 py-0.2 rounded bg-emerald-500/10 text-emerald-300 border border-emerald-500/20">正常照合</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Vision State Description Box -->
+                <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-sm">
+                    <div class="flex items-center justify-between mb-2">
+                        <span class="text-xs font-bold text-cyan-400 uppercase tracking-wider flex items-center gap-1.5">
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                            Vision State Caption
+                        </span>
+                        <span id="vision-sample-time" class="text-[11px] font-mono text-slate-500">--:--:--</span>
+                    </div>
+                    <div class="bg-slate-950/80 border border-slate-800/80 rounded-lg p-3">
+                        <p id="vision-state-text" class="text-xs font-mono text-slate-300 leading-relaxed italic">
+                            "Awaiting frame extraction..."
+                        </p>
+                    </div>
+                </div>
+
+                <!-- Jev Decision Cards (Choice, Score, Noul) -->
+                <div id="decision-cards-container" class="space-y-3">
+                    <div class="bg-slate-900/60 border border-slate-800 rounded-xl p-5 text-center text-slate-500 text-xs">
+                        Waiting for decision cycle...
+                    </div>
+                </div>
+
+                <!-- RAG Recommended SOP Action Card -->
+                <div id="rag-sop-card" class="bg-slate-900 border border-indigo-500/30 rounded-xl p-4 shadow-lg">
+                    <div class="flex items-center justify-between mb-2.5">
+                        <div class="flex items-center gap-2">
+                            <span class="px-2 py-0.5 text-[10px] font-bold rounded bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 uppercase">SOP RAG</span>
+                            <h3 id="rag-sop-title" class="text-xs font-bold text-slate-200">標準作業手順（SOP）検索中</h3>
+                        </div>
+                        <span id="rag-sop-priority" class="px-2 py-0.5 text-[10px] font-bold rounded bg-slate-800 text-slate-400">INFO</span>
+                    </div>
+                    <p id="rag-sop-summary" class="text-xs text-slate-400 mb-3">状況に合致する緊急対応手順をナレッジベースから即座に引き当てます。</p>
+                    
+                    <div id="rag-sop-steps" class="space-y-1.5 bg-slate-950/70 border border-slate-800 rounded-lg p-3 text-xs text-slate-300 font-mono">
+                        <div>・状況の推移を注視してください。</div>
+                    </div>
+
+                    <div id="rag-sop-contacts" class="mt-3 pt-2.5 border-t border-slate-800/80 text-[11px] text-slate-400 flex flex-wrap gap-2">
+                        <!-- Contacts rendered here -->
+                    </div>
+                </div>
+
+            </div>
+
+        </div>
+    </main>
+
+    <!-- Modal: Add Camera (RTSP / JPEG / Webcam / Synthetic) -->
+    <div id="modal-add-cam" class="hidden fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div class="bg-slate-900 border border-slate-700 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+            <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+                <h3 class="font-bold text-base text-slate-100 flex items-center gap-2">
+                    <svg class="w-5 h-5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
+                    監視カメラの追加
+                </h3>
+                <button id="btn-close-add-cam" class="text-slate-400 hover:text-white">&times;</button>
+            </div>
+
+            <form id="form-add-cam" class="space-y-3.5 text-xs">
+                <div>
+                    <label class="block text-slate-300 font-medium mb-1">カメラID (英数字・一意)</label>
+                    <input type="text" id="add-cam-id" required placeholder="cam_02" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-indigo-500">
+                </div>
+                <div>
+                    <label class="block text-slate-300 font-medium mb-1">カメラ名</label>
+                    <input type="text" id="add-cam-name" required placeholder="南門外周フェンス" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-indigo-500">
+                </div>
+                <div>
+                    <label class="block text-slate-300 font-medium mb-1">ソース種別</label>
+                    <select id="add-cam-type" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-indigo-500">
+                        <option value="hls">HLS ライブストリーム (https://.../*.m3u8)</option>
+                        <option value="youtube">YouTube 監視カメラ / ライブ配信 (https://youtube.com/...)</option>
+                        <option value="rtsp">RTSP 監視カメラ (rtsp://...)</option>
+                        <option value="jpeg_url">HTTP JPEG / スナップショットURL (http://...)</option>
+                        <option value="webcam">ローカルWebカメラ (0, 1, /dev/video0)</option>
+                        <option value="file">動画ファイル (mp4, avi, mkv)</option>
+                        <option value="synthetic">テスト用合成映像 (Synthetic)</option>
+                    </select>
+                </div>
+                <div>
+                    <div class="flex items-center justify-between mb-1">
+                        <label class="block text-slate-300 font-medium">ソースURL / デバイス番号</label>
+                        <span class="text-[10px] text-slate-400">HLS(.m3u8), YouTube, RTSP, Webカメラ対応</span>
+                    </div>
+                    <input type="text" id="add-cam-url" required placeholder="https://.../stream.m3u8 または https://www.youtube.com/... または rtsp://..." class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-indigo-500">
+                    <!-- Sample presets for instant testing -->
+                    <div class="mt-2 flex items-center gap-1.5 flex-wrap">
+                        <span class="text-[10px] text-slate-400">サンプル入力:</span>
+                        <button type="button" onclick="setSampleUrl('https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8', 'hls', 'HLS Test Stream')" class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-cyan-300 text-[10px] border border-slate-700" title="認証不要で即座に安定再生可能なHLSストリーム">
+                            📡 HLS テスト配信 (即時再生)
+                        </button>
+                        <button type="button" onclick="setSampleUrl('https://bitdash-a.akamaihd.net/content/sintel/hls/playlist.m3u8', 'hls', 'Animation HLS')" class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-emerald-300 text-[10px] border border-slate-700" title="Akamai CDNのオープンHLS配信">
+                            🎬 Sintel HLS配信
+                        </button>
+                        <button type="button" onclick="setSampleUrl('https://www.youtube.com/watch?v=dQw4w9WgXcQ', 'youtube', 'YouTube Test Video')" class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-indigo-300 text-[10px] border border-slate-700" title="BotGuard回避確認済みYouTubeテスト動画">
+                            ▶️ YouTube 動作確認動画
+                        </button>
+                        <button type="button" onclick="setSampleUrl('synthetic', 'synthetic', '合成映像テスト')" class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-purple-300 text-[10px] border border-slate-700">
+                            ⚙️ 合成テスト映像
+                        </button>
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-slate-300 font-medium mb-1">監視プリセット</label>
+                        <select id="add-cam-preset" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-indigo-500">
+                            {% for p in presets %}
+                            <option value="{{ p.id }}">{{ p.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-slate-300 font-medium mb-1">推論FPS (0.1〜10.0)</label>
+                        <input type="number" id="add-cam-fps" step="0.1" min="0.1" max="10.0" value="1.0" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-indigo-500">
+                    </div>
+                </div>
+
+                <div class="pt-2 flex justify-end gap-2">
+                    <button type="button" id="btn-cancel-add-cam" class="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300">キャンセル</button>
+                    <button type="submit" class="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold shadow">カメラを起動</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal: WebHook Management -->
+    <div id="modal-webhooks" class="hidden fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div class="bg-slate-900 border border-slate-700 rounded-2xl max-w-xl w-full p-6 shadow-2xl space-y-4">
+            <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+                <h3 class="font-bold text-base text-slate-100 flex items-center gap-2">
+                    <svg class="w-5 h-5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                    WebHook 通知先設定
+                </h3>
+                <button id="btn-close-webhooks" class="text-slate-400 hover:text-white">&times;</button>
+            </div>
+
+            <!-- Existing WebHooks List -->
+            <div id="webhooks-list-container" class="space-y-2 max-h-48 overflow-y-auto pr-1">
+                <!-- Dynamically rendered -->
+            </div>
+
+            <!-- Add Webhook Form -->
+            <form id="form-add-webhook" class="bg-slate-950/80 border border-slate-800 rounded-xl p-4 space-y-3 text-xs">
+                <div class="font-semibold text-slate-300">新しい通知先を追加</div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-slate-400 mb-1">通知先名</label>
+                        <input type="text" id="wh-name" required placeholder="警備Slackチャンネル" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-200">
+                    </div>
+                    <div>
+                        <label class="block text-slate-400 mb-1">フォーマット</label>
+                        <select id="wh-format" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-200">
+                            <option value="slack">Slack Incoming Webhook</option>
+                            <option value="discord">Discord Webhook</option>
+                            <option value="generic_json">汎用 JSON HTTP POST</option>
+                        </select>
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-slate-400 mb-1">WebHook URL</label>
+                    <input type="url" id="wh-url" required placeholder="https://hooks.slack.com/services/... or http://server:port/alert" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-200">
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-slate-400 mb-1">最小アラートスコア (0.0〜1.0)</label>
+                        <input type="number" id="wh-min-score" step="0.05" min="0.0" max="1.0" value="0.75" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-200">
+                    </div>
+                    <div>
+                        <label class="block text-slate-400 mb-1">クールダウン (秒)</label>
+                        <input type="number" id="wh-cooldown" min="5" value="30" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-200">
+                    </div>
+                </div>
+                <div class="flex justify-end">
+                    <button type="submit" class="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold">WebHookを登録</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal: RAG SOP Knowledge Viewer -->
+    <div id="modal-rag" class="hidden fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div class="bg-slate-900 border border-slate-700 rounded-2xl max-w-2xl w-full p-6 shadow-2xl space-y-4">
+            <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+                <h3 class="font-bold text-base text-slate-100 flex items-center gap-2">
+                    <svg class="w-5 h-5 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path></svg>
+                    RAG 緊急対応マニュアル (SOP Knowledge Base)
+                </h3>
+                <button id="btn-close-rag" class="text-slate-400 hover:text-white">&times;</button>
+            </div>
+            <div class="text-xs text-slate-400">
+                異常事態検知時、Jev決定エンジンからの出力テキストに基づいて最適な初動対応マニュアル（SOP）をリアルタイムに検索・提示します。
+            </div>
+            <div id="rag-docs-list" class="space-y-3 max-h-96 overflow-y-auto pr-1">
+                <!-- RAG documents rendered dynamically -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Visual Example RAG Reference Gallery & Register -->
+    <div id="modal-visual-rag" class="hidden fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div class="bg-slate-900 border border-slate-700 rounded-2xl max-w-3xl w-full p-6 shadow-2xl space-y-4 max-h-[90vh] flex flex-col">
+            <div class="flex items-center justify-between border-b border-slate-800 pb-3 flex-shrink-0">
+                <div>
+                    <h3 class="font-bold text-base text-slate-100 flex items-center gap-2">
+                        <svg class="w-5 h-5 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+                        画像RAG (Visual Example RAG) リファレンス管理
+                    </h3>
+                    <p class="text-xs text-slate-400 mt-0.5">現場の正常ベースライン画像や過去の異常写真を512次元ベクトル登録し、コサイン類似度で照合します。</p>
+                </div>
+                <button id="btn-close-visual-rag" class="text-slate-400 hover:text-white">&times;</button>
+            </div>
+
+            <!-- Existing References Grid -->
+            <div class="flex-1 overflow-y-auto pr-1 space-y-2">
+                <div class="flex items-center justify-between">
+                    <span class="text-xs font-semibold text-slate-300">登録済みリファレンス画像</span>
+                    <span id="visual-rag-count" class="text-[11px] font-mono text-purple-400">12 枚</span>
+                </div>
+                <div id="visual-rag-list" class="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                    <!-- Dynamically populated -->
+                </div>
+            </div>
+
+            <!-- Register New Reference Form -->
+            <form id="form-register-visual-rag" class="bg-slate-950/80 border border-slate-800 rounded-xl p-3.5 space-y-2.5 text-xs flex-shrink-0">
+                <div class="font-semibold text-slate-300 flex items-center justify-between">
+                    <span>新規リファレンス画像を登録 (Few-Shot追加)</span>
+                    <span class="text-[10px] text-slate-500 font-normal">再学習不要・即座に反映</span>
+                </div>
+                <div class="grid grid-cols-3 gap-2.5">
+                    <div>
+                        <label class="block text-slate-400 mb-1">タイトル</label>
+                        <input type="text" id="vr-title" required placeholder="例: 正常ライン設備" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1 text-slate-200">
+                    </div>
+                    <div>
+                        <label class="block text-slate-400 mb-1">カテゴリ</label>
+                        <select id="vr-category" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1 text-slate-200">
+                            <option value="fire_disaster">火災・防災</option>
+                            <option value="nursing_care">介護見守り</option>
+                            <option value="river_flood">河川水害</option>
+                            <option value="security">防犯立ち入り</option>
+                            <option value="factory_safety">工場安全</option>
+                            <option value="railway_platform">駅ホーム安全</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-slate-400 mb-1">画像種別</label>
+                        <select id="vr-anomaly" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1 text-slate-200">
+                            <option value="false">✅ 正常ベースライン</option>
+                            <option value="true">⚠️ 過去異常事例</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 gap-2.5 items-end">
+                    <div>
+                        <label class="block text-slate-400 mb-1">画像ファイル (JPG / PNG)</label>
+                        <input type="file" id="vr-file" accept="image/*" required class="w-full text-slate-400 text-xs file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-xs file:bg-slate-800 file:text-slate-200 hover:file:bg-slate-700">
+                    </div>
+                    <div class="flex justify-end gap-2">
+                        <button type="submit" class="px-4 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-500 text-white font-semibold">ベクトル登録</button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 py-6 mt-6 border-t border-slate-900 text-center text-xs text-slate-600">
+        Vision-Jev Guard Platform &bull; MIT License &bull; N-Camera Hub &bull; Jev Decision Engine &bull; SOP RAG
+    </footer>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>

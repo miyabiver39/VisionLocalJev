@@ -1,0 +1,46 @@
+services:
+  # Main Vision-Jev Guard Platform (Powered by DiffusionGemma-Jev)
+  vision-guard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ghcr.io/your-org/vision-jev-guard:latest
+    container_name: vision-guard-platform
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      # Video & Device Configuration
+      - CAMERA_SOURCE=synthetic       # synthetic, 0, /dev/video0, rtsp://..., or YouTube URL
+      - DEVICE=cpu                    # cpu | cuda
+      - SAMPLE_FPS=1.0                # Frame inference sample rate per camera
+      - ALERT_THRESHOLD=0.80          # Alert trigger threshold (0.1 - 0.99)
+
+      # Vision & DiffusionGemma-Jev (DJev) Engine
+      - VISION_MODE=detector          # detector (CPU Real CV) | mock | vlm
+      - DECISION_ENGINE=diffusion-gemma-jev
+      - DJEV_MODE=embedded            # embedded (CPU local diffusion) | remote (vLLM / djev-dev server)
+      - DJEV_SERVER_URL=http://localhost:8080/v1/djev/decide
+      - DJEV_DIFFUSION_STEPS=8        # Non-autoregressive discrete diffusion steps
+
+      # RAG Configuration (Embedded by default, or point to external server)
+      - RAG_SERVER_URL=
+
+    volumes:
+      - ./app/presets:/app/app/presets:ro
+
+    # Linuxホストの物理Webカメラをマウントする場合（Windows/Macではコメントアウト推奨）
+    # devices:
+    #   - "/dev/video0:/dev/video0"
+
+    # カメラデバイス権限エラー（Permission denied）が発生する場合に有効化
+    # privileged: true
+
+    # NVIDIA GPU（CUDA/TensorRT）を利用する場合の定義
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]

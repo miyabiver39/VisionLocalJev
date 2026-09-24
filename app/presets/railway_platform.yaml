@@ -1,0 +1,20 @@
+id: "railway_platform"
+name: "駅ホーム・線路安全監視"
+description: "点字ブロック外側通行、ホーム端滞留、ホーム柵乗り越え、線路転落の検知"
+questions:
+  - id: "platform_status"
+    type: "choice"
+    label: "ホーム旅客行動"
+    choices:
+      - "safe_waiting"       # 安全待機・正常乗降
+      - "beyond_yellow_line" # 点字ブロック外側歩行・端部滞留
+      - "track_intrusion"    # ホーム柵乗り越え・線路内立入
+      - "track_fall"         # 線路転落・列車直前非常事態
+  - id: "collision_hazard"
+    type: "score"
+    label: "列車抑止切迫度"
+    rubric: "Rate collision hazard from 0.0 (safe behind yellow line) to 1.0 (person fallen onto active railway tracks)."
+  - id: "train_halt_signal"
+    type: "noul"
+    label: "列車非常停止ボタン発令"
+    hypothesis: "Person on track requires immediate railway emergency brake signal."

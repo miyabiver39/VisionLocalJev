@@ -1,0 +1,20 @@
+id: "fire_disaster"
+name: "火災・防災監視"
+description: "火炎、黒煙、水蒸気の識別および緊急避難要否判定"
+questions:
+  - id: "hazard_type"
+    type: "choice"
+    label: "検知対象"
+    choices:
+      - "none"
+      - "steam_vapor"        # 湯気・水蒸気（誤報防止）
+      - "dark_smoke"         # 黒煙・煙火災
+      - "open_flame"         # 開放火炎
+  - id: "urgency_score"
+    type: "score"
+    label: "切迫度"
+    rubric: "Rate immediate threat to life or property."
+  - id: "evacuate"
+    type: "noul"
+    label: "避難判定"
+    hypothesis: "Visible fire or dangerous smoke requires immediate evacuation."
