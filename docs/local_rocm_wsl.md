@@ -64,7 +64,7 @@ python scripts/diffusiongemma_vision_check.py \
 
 | 値 | 読み込み後 VRAM | 結果 |
 |---|---|---|
-| 10 | 約 12.6GiB | 生成中に VRAM 不足 (hipBLAS の初期化に失敗) |
+| 10 | 約 12.6GiB (推定) | 生成中に VRAM 不足 (hipBLAS の初期化に失敗) |
 | 14 | 10.9GiB | 成功 (ピーク 13.0GiB) |
 
 ## 今後の改善余地
