@@ -72,3 +72,43 @@ python scripts/diffusiongemma_vision_check.py \
 - 生成速度: 拡散の 1 ステップごとに全層のエキスパートを展開・転送している。展開済み重みのキャッシュ、融合カーネル、
   ステップ数 (`--max-denoising-steps`) の調整で短縮できる見込み。
 - 本番相当の検証は NVIDIA GPU (H100 等) で公式 BF16 版 (`--lowvram` なし) を使うのが確実。
+
+---
+
+# imajev（Qwen3.5 + LoRA、TypeSafe System One 互換）をローカルで動かす
+
+[imajev](https://github.com/mohit67890/imajev) は Qwen3.5 に判定用 LoRA を載せた、画像入力つきの Jev 互換モデルです。
+1 回の forward で選択肢の確率を返し（文章を生成しない）、TypeSafe の `/v1/systemone` 形式で応答します。
+アプリからは `DJEV_MODE=remote` でそのまま使えます。
+
+## 起動
+
+```bash
+wsl -d Ubuntu-24.04 -- bash scripts/serve_imajev_wsl.sh 4b 1   # 初回セットアップ手順はスクリプト冒頭のコメント参照
+```
+
+```bash
+DJEV_MODE=remote DJEV_SERVER_URL=http://127.0.0.1:8765 DJEV_MODEL=imajev-4b DJEV_IMAGE_MODE=images uvicorn app.main:app --port 8000
+```
+
+**`flash-linear-attention` が必須**です。無い場合、Qwen3.5 の Gated DeltaNet 層が参照実装で動き、
+imajev-2b で 1 リクエスト（3 問、選択肢の並べ替え 4 回）約 35 秒かかりました。導入後は Triton カーネルが AMD GPU でも動作します。
+
+## 結果（RX 9060 XT 16GB、2026-09-25）
+
+`scripts/typesafe_remote_eval.py` で、6 プリセット × 正常/異常の**図形で描いた合成画像** 12 枚を、アプリの判定エンジン経由で送信。
+1 リクエスト = 画像 1 枚 + 設問 3 問（choice / score / noul）、選択肢の並べ替え 1 回（`--rotations 1`）。
+
+| モデル | 1 リクエスト（中央値） | 初回（カーネルのコンパイル込み） | VRAM（デスクトップ込み） | choice の正解数（12 枚） |
+|---|---|---|---|---|
+| imajev-2b | 約 850ms | 85 秒 | 約 6.6〜6.9GB | 5 / 12 |
+| imajev-4b | 約 1.2 秒 | 38 秒 | 約 11.2GB | 7 / 12 |
+
+- imajev-4b は、線路転落（`track_fall` 0.84）、作業員倒臥（`worker_down` 0.63）、転倒（`fall_detected` 0.89）、柵越え（`trespassing` 0.76）を異常画像で選び、介護・火災・河川の正常画像も正しく判定した。
+  一方、図形の炎や氾濫は見分けられなかった。
+- 画像は棒人間や色の図形で描いた簡易なもので、**判定精度の評価には使えません**。実際のカメラ映像での評価が必要です。
+- imajev のサーバーは 1 問ずつ forward するため、設問数に比例して時間が延びる（1 問あたり 2b で約 0.28 秒、4b で約 0.4 秒）。
+- アプリ経由（`DJEV_MODE=remote`、合成カメラ 960×540）では imajev-4b で 1 リクエスト約 3.1〜3.5 秒でした。
+  入力 683 トークンで、評価スクリプトの 640×360 画像より画像トークンが多いためです。
+- 起動直後や新しい画像サイズでの初回は、Triton カーネルのコンパイルで 30 秒以上かかり、`DJEV_TIMEOUT` を超えるとタイムアウトエラーになります
+  （フォールバックはせず、画面に「判定エンジンエラー」を表示）。本番では起動時に 1 回ウォームアップのリクエストを送ってください。

@@ -19,9 +19,12 @@ services:
       # Vision & DiffusionGemma-Jev (DJev) Engine
       - VISION_MODE=detector          # detector (CPU Real CV) | mock | vlm
       - DECISION_ENGINE=diffusion-gemma-jev
-      - DJEV_MODE=embedded            # embedded (CPU local diffusion) | remote (vLLM / djev-dev server)
-      - DJEV_SERVER_URL=http://localhost:8080/v1/djev/decide
-      - DJEV_DIFFUSION_STEPS=8        # Non-autoregressive discrete diffusion steps
+      - DJEV_MODE=embedded            # embedded (CPU emulator) | remote (TypeSafe System One compatible server)
+      - DJEV_SERVER_URL=http://host.docker.internal:8765/v1/systemone
+      - DJEV_MODEL=jev-latest         # jev-latest / imajev-4b / qev:0.8b ...
+      - DJEV_API_KEY=${DJEV_API_KEY:-}
+      - DJEV_IMAGE_MODE=images        # images (imajev) | state_content (Qev) | none (TypeSafe Jev / Kev)
+      - DJEV_TIMEOUT=10
 
       # RAG Configuration (Embedded by default, or point to external server)
       - RAG_SERVER_URL=

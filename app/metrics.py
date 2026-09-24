@@ -16,6 +16,7 @@ class MetricsTracker:
         self.total_frames_dropped = 0
         self.total_inferences = 0
         self.total_alerts = 0
+        self.total_decision_errors = 0
         
         self.latest_vision_latency_ms = 0.0
         self.latest_decision_latency_ms = 0.0
@@ -38,6 +39,10 @@ class MetricsTracker:
     def record_frame_sampled(self):
         with self.lock:
             self.total_frames_sampled += 1
+
+    def record_decision_error(self):
+        with self.lock:
+            self.total_decision_errors += 1
 
     def record_frame_dropped(self):
         with self.lock:
@@ -75,6 +80,7 @@ class MetricsTracker:
                 "inference": {
                     "total_cycles": self.total_inferences,
                     "total_alerts": self.total_alerts,
+                    "decision_errors": self.total_decision_errors,
                     "sampled_frames": self.total_frames_sampled,
                     "dropped_frames": self.total_frames_dropped,
                     "vision_latency_ms": self.latest_vision_latency_ms,

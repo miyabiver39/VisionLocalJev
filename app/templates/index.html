@@ -44,7 +44,7 @@
                             <span class="font-bold text-lg tracking-tight bg-gradient-to-r from-white via-slate-200 to-slate-400 bg-clip-text text-transparent">Vision-Jev Guard</span>
                             <span class="px-2 py-0.5 text-[10px] font-bold rounded bg-purple-500/20 text-purple-300 border border-purple-500/30 uppercase flex items-center gap-1">
                                 <span class="w-1.5 h-1.5 rounded-full bg-purple-400 animate-pulse"></span>
-                                DiffusionGemma-Jev (DJev)
+                                Typed Decision ({{ djev_mode }})
                             </span>
                         </div>
                         <div class="text-[11px] text-slate-400">Multi-Camera Hub &bull; Multimodal Discrete Text Diffusion &bull; SOP RAG</div>
@@ -244,18 +244,18 @@
                     <div class="flex items-center justify-between">
                         <div class="flex items-center gap-2">
                             <span class="w-2 h-2 rounded-full bg-purple-400 animate-pulse"></span>
-                            <span class="text-xs font-bold text-purple-300 uppercase tracking-wider">DJev Discrete Diffusion</span>
+                            <span class="text-xs font-bold text-purple-300 uppercase tracking-wider">Decision Engine (TypeSafe System One)</span>
                         </div>
-                        <span id="djev-model-tag" class="text-[10px] font-mono text-slate-400 bg-slate-950 px-2 py-0.5 rounded border border-slate-800">DiffusionGemma-26B-Jev</span>
+                        <span id="djev-model-tag" class="text-[10px] font-mono text-slate-400 bg-slate-950 px-2 py-0.5 rounded border border-slate-800">{{ djev_model if djev_mode == "remote" else "embedded-cpu-emulator" }}</span>
                     </div>
                     <div class="grid grid-cols-3 gap-2 text-[11px] font-mono text-slate-300">
                         <div class="bg-slate-950/70 p-1.5 rounded border border-slate-800/80">
-                            <div class="text-[9px] text-slate-500">STEPS (t=T&rarr;0)</div>
-                            <div id="djev-steps-val" class="font-bold text-purple-400">8 Steps</div>
+                            <div class="text-[9px] text-slate-500">MODE</div>
+                            <div id="djev-steps-val" class="font-bold text-purple-400">-</div>
                         </div>
                         <div class="bg-slate-950/70 p-1.5 rounded border border-slate-800/80">
-                            <div class="text-[9px] text-slate-500">ENTROPY</div>
-                            <div id="djev-entropy-val" class="font-bold text-cyan-400">0.042</div>
+                            <div class="text-[9px] text-slate-500">INPUT</div>
+                            <div id="djev-entropy-val" class="font-bold text-cyan-400">-</div>
                         </div>
                         <div class="bg-slate-950/70 p-1.5 rounded border border-slate-800/80">
                             <div class="text-[9px] text-slate-500">INPUT TENSOR</div>

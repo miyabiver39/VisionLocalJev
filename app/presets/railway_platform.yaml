@@ -1,20 +1,29 @@
 id: "railway_platform"
 name: "駅ホーム・線路安全監視"
 description: "点字ブロック外側通行、ホーム端滞留、ホーム柵乗り越え、線路転落の検知"
+# questions は TypeSafe System One の Question 形式 (type / instructions / criteria)。
+# label は画面表示用で、推論サーバーには送らない。
 questions:
   - id: "platform_status"
     type: "choice"
     label: "ホーム旅客行動"
-    choices:
-      - "safe_waiting"       # 安全待機・正常乗降
-      - "beyond_yellow_line" # 点字ブロック外側歩行・端部滞留
-      - "track_intrusion"    # ホーム柵乗り越え・線路内立入
-      - "track_fall"         # 線路転落・列車直前非常事態
+    instructions: "What are the passengers on this railway platform camera doing?"
+    criteria:
+      safe_waiting: "Waiting safely behind the yellow line"                         # 安全待機・正常乗降
+      beyond_yellow_line: "Walking or standing beyond the yellow tactile line"      # 点字ブロック外側歩行・端部滞留
+      track_intrusion: "Climbing the platform barrier or entering the track area"   # ホーム柵乗り越え・線路内立入
+      track_fall: "A person has fallen onto the tracks"                             # 線路転落・列車直前非常事態
   - id: "collision_hazard"
     type: "score"
     label: "列車抑止切迫度"
-    rubric: "Rate collision hazard from 0.0 (safe behind yellow line) to 1.0 (person fallen onto active railway tracks)."
+    instructions: "How high is the risk of a person being hit by a train?"
+    criteria:
+      - "None: everyone behind the yellow line"
+      - "Low: someone close to the yellow line"
+      - "Moderate: someone beyond the yellow line"
+      - "High: someone at the platform edge or climbing a barrier"
+      - "Critical: a person on the tracks"
   - id: "train_halt_signal"
     type: "noul"
     label: "列車非常停止ボタン発令"
-    hypothesis: "Person on track requires immediate railway emergency brake signal."
+    instructions: "Is a person on the track so that an immediate emergency stop signal is required?"

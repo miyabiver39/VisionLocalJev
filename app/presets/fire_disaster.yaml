@@ -1,20 +1,29 @@
 id: "fire_disaster"
 name: "火災・防災監視"
 description: "火炎、黒煙、水蒸気の識別および緊急避難要否判定"
+# questions は TypeSafe System One の Question 形式 (type / instructions / criteria)。
+# label は画面表示用で、推論サーバーには送らない。
 questions:
   - id: "hazard_type"
     type: "choice"
     label: "検知対象"
-    choices:
-      - "none"
-      - "steam_vapor"        # 湯気・水蒸気（誤報防止）
-      - "dark_smoke"         # 黒煙・煙火災
-      - "open_flame"         # 開放火炎
+    instructions: "What fire-related hazard, if any, is visible in this scene?"
+    criteria:
+      none: "No smoke, steam or fire"
+      steam_vapor: "Harmless white steam or water vapour (e.g. a kettle)"   # 湯気・水蒸気（誤報防止）
+      dark_smoke: "Dense dark or black smoke"                                # 黒煙・煙火災
+      open_flame: "Visible open flames or fire"                             # 開放火炎
   - id: "urgency_score"
     type: "score"
     label: "切迫度"
-    rubric: "Rate immediate threat to life or property."
+    instructions: "How immediate is the threat to life or property?"
+    criteria:
+      - "None: the scene is safe"
+      - "Low: harmless steam or heat source"
+      - "Moderate: smoke of unknown origin"
+      - "High: spreading smoke or small fire"
+      - "Critical: active fire or dense smoke endangering people"
   - id: "evacuate"
     type: "noul"
     label: "避難判定"
-    hypothesis: "Visible fire or dangerous smoke requires immediate evacuation."
+    instructions: "Does visible fire or dangerous smoke require immediate evacuation?"

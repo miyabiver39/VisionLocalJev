@@ -147,9 +147,12 @@ python scripts/test_visual_rag.py
 |---|---|---|
 | `CAMERA_SOURCE` | `synthetic` | 初期カメラソース（`synthetic` / `0` / HLS / RTSP / YouTube URL） |
 | `DECISION_ENGINE` | `diffusion-gemma-jev` | 決定エンジン種別（`diffusion-gemma-jev`） |
-| `DJEV_MODE` | `embedded` | `embedded`（CPU エミュレータ）または `remote`（外部推論サーバーへ POST。現状のペイロードは djev-dev の `/v1/request` API と互換ではありません。#15 参照） |
-| `DJEV_SERVER_URL` | `http://localhost:8080/v1/djev/decide` | `DJEV_MODE=remote` 時の接続先エンドポイント |
-| `DJEV_DIFFUSION_STEPS` | `8` | 離散拡散デノイジングステップ数（2〜32） |
+| `DJEV_MODE` | `embedded` | `embedded`（CPU エミュレータ）または `remote`（[TypeSafe System One](https://docs.typesafe.ai/api) 互換サーバーへ `POST /v1/systemone`）。remote で失敗した場合はエラーとして扱い、エミュレータへは切り替えない |
+| `DJEV_SERVER_URL` | `http://localhost:8765/v1/systemone` | `DJEV_MODE=remote` 時の接続先（`/v1/systemone` は省略可） |
+| `DJEV_MODEL` | `jev-latest` | リクエストの `model`（例: `jev-latest`, `imajev-4b`, `qev:0.8b`） |
+| `DJEV_API_KEY` | （空） | 設定時に `Authorization: Bearer <key>` を付与 |
+| `DJEV_IMAGE_MODE` | `images` | 画像の渡し方。`images`（imajev: トップレベル `images` 配列）/ `state_content`（Qev: state を OpenAI 形式の content 配列に）/ `none`（TypeSafe Jev・Kev: テキストのみ） |
+| `DJEV_TIMEOUT` | `10` | リモート推論のタイムアウト（秒） |
 | `SAMPLE_FPS` | `1.0` | 推論サンプリングFPS（0.1〜10.0） |
 | `ALERT_THRESHOLD` | `0.80` | アラートを発報するスコア/確信度の閾値 |
 | `VISION_MODE` | `detector` | 映像状態抽出モード（`detector`: CPU CV / `mock`: デモ用シナリオ / `vlm`: Moondream2 等） |
@@ -160,6 +163,16 @@ python scripts/test_visual_rag.py
 
 ---
 
-## 9. ライセンス
+## 9. 判定エンジン API（TypeSafe System One 形式）
+
+判定エンジンの入出力は [TypeSafe System One API](https://docs.typesafe.ai/api) の形式に揃えています。
+
+- プリセット YAML の `questions` は TypeSafe の Question 形式（`type` / `instructions` / `criteria`）で、`label` は画面表示専用です。
+- 判定結果は `answers`（`noul` / `choice` / `score` の Answer 形式）と `usage` で返ります（WebSocket の `decision.answers`、`/api/trigger_scenario` のレスポンス）。
+- `DJEV_MODE=remote` では、TypeSafe 本家（`jev-latest`、テキストのみ）や互換モデル（imajev・Qev・Kev など）をそのまま使えます。
+- リモート推論の失敗（接続失敗・タイムアウト・HTTP エラー・形式不正）は、画面に「判定エンジンエラー」として表示し、WebSocket に `decision_error` を送ります。`/api/trigger_scenario` は 502（タイムアウトは 504）を返します。CPU エミュレータへの自動切り替えは行いません。
+- ローカル GPU で imajev を動かす手順は [docs/local_rocm_wsl.md](docs/local_rocm_wsl.md) を参照してください。
+
+## 10. ライセンス
 
 本プロジェクトは **MIT License** のもとで公開されています。商用・非商用問わず自由にご利用いただけます。
