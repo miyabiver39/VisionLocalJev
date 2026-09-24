@@ -6,6 +6,7 @@
 let ws = null;
 let cameras = [];
 let currentLayout = "2"; // 1 | 2 | auto
+let presetList = [];     // [{id, name, ...}] loaded from /api/presets
 
 document.addEventListener("DOMContentLoaded", () => {
     initPresetSelector();
@@ -15,7 +16,7 @@ document.addEventListener("DOMContentLoaded", () => {
     initVisualRAGModal();
     initQuickTestButtons();
     connectWebSocket();
-    fetchCameras();
+    fetchPresets().then(fetchCameras);
     fetchWebhooks();
     fetchRAGDocs();
     fetchVisualRAGReferences();
@@ -41,6 +42,22 @@ function initThresholdSelector() {
 
 function initPresetSelector() {
     // Optional global preset selector if present
+}
+
+async function fetchPresets() {
+    try {
+        const resp = await fetch("/api/presets");
+        presetList = await resp.json();
+    } catch (e) {
+        console.error("Failed to fetch presets:", e);
+    }
+}
+
+function renderPresetOptions(selectedId) {
+    const list = presetList.length ? presetList : [{ id: selectedId, name: selectedId }];
+    return list.map(p =>
+        `<option value="${p.id}" ${p.id === selectedId ? 'selected' : ''}>${p.name}</option>`
+    ).join("");
 }
 
 // ===================== WebSocket & Telemetry =====================
@@ -453,8 +470,7 @@ function renderCamerasGrid(camList) {
                     <div class="flex items-center gap-1.5 text-slate-400">
                         <span>プリセット:</span>
                         <select onchange="updateCameraPreset('${cam.camera_id}', this.value)" class="bg-slate-950 border border-slate-700 rounded px-2 py-1 text-slate-200 text-xs focus:outline-none cursor-pointer">
-                            <option value="security" ${cam.preset_id === 'security' ? 'selected' : ''}>防犯・立ち入り</option>
-                            <option value="fire_disaster" ${cam.preset_id === 'fire_disaster' ? 'selected' : ''}>火災・防災</option>
+                            ${renderPresetOptions(cam.preset_id)}
                         </select>
                     </div>
                     <span class="text-[11px] font-mono text-slate-500 truncate max-w-[140px]" title="${cam.source_url}">

@@ -162,6 +162,19 @@ class VisualRAGRegisterRequest(BaseModel):
     description: Optional[str] = ""
 
 
+# ===================== Validation Helpers =====================
+
+def is_valid_preset(preset_id: Optional[str]) -> bool:
+    return bool(preset_id) and decision_engine is not None and preset_id in decision_engine.presets
+
+
+def require_valid_preset(preset_id: Optional[str]):
+    """Raises HTTP 400 if the preset id is unknown to the decision engine."""
+    if not is_valid_preset(preset_id):
+        available = sorted(decision_engine.presets.keys()) if decision_engine else []
+        raise HTTPException(status_code=400, detail=f"Unknown preset_id '{preset_id}'. Available: {available}")
+
+
 # ===================== WebSocket & Broadcast =====================
 
 async def broadcast_ws(message: dict):
@@ -235,6 +248,10 @@ async def multi_camera_inference_loop():
             decision_res = await loop.run_in_executor(
                 None, decision_engine.evaluate_multimodal, frame, preset_id, cam_id, cam_name, state_text
             )
+            if "error" in decision_res:
+                # Misconfigured preset: skip this sample instead of stalling the whole loop
+                logger.warning(f"Skipping inference for camera '{cam_id}': {decision_res['error']}")
+                continue
             decision_latency = decision_res["latency_ms"]
 
             # 3. RAG Knowledge Retrieval (Standard Operating Procedure)
@@ -435,12 +452,14 @@ async def websocket_endpoint(websocket: WebSocket):
                 action = msg.get("action")
                 if action == "select_preset":
                     preset_id = msg.get("preset_id")
+                    if not is_valid_preset(preset_id):
+                        continue
                     cam_id = msg.get("camera_id")
                     if cam_id:
                         camera_manager.update_camera_preset(cam_id, preset_id)
                     else:
                         for c in camera_manager.get_all_cameras():
-                            c.preset_id = preset_id
+                            camera_manager.update_camera_preset(c.camera_id, preset_id)
                     await broadcast_ws({
                         "type": "cameras_updated",
                         "cameras": camera_manager.get_all_status()
@@ -483,6 +502,7 @@ async def list_cameras():
 @app.post("/api/cameras")
 async def add_camera(req: CameraCreateRequest):
     """Registers and starts a new camera (RTSP, JPEG URL, Webcam, or Synthetic)."""
+    require_valid_preset(req.preset_id)
     try:
         cam = camera_manager.add_camera(
             camera_id=req.camera_id,
@@ -517,13 +537,17 @@ async def update_camera(cam_id: str, req: CameraUpdateRequest):
     if not cam:
         raise HTTPException(status_code=404, detail="Camera not found")
 
+    if req.preset_id is not None:
+        require_valid_preset(req.preset_id)
+    if req.sample_fps is not None and req.sample_fps <= 0:
+        raise HTTPException(status_code=400, detail="sample_fps must be greater than 0")
+
     if req.name is not None:
         cam.name = req.name
     if req.preset_id is not None:
         cam.preset_id = req.preset_id
     if req.sample_fps is not None:
-        cam.sample_fps = req.sample_fps
-        cam.sample_interval = 1.0 / cam.sample_fps
+        cam.set_sample_fps(req.sample_fps)
 
     await broadcast_ws({
         "type": "cameras_updated",
@@ -632,6 +656,7 @@ async def trigger_manual_scenario(req: ManualTriggerRequest):
     cam = camera_manager.get_camera(req.camera_id or "cam_main")
     cam_name = cam.name if cam else (req.camera_id or "Manual Injection")
     preset_id = req.preset_id or "security"
+    require_valid_preset(preset_id)
 
     eval_res = decision_engine.evaluate(req.state, preset_id, req.camera_id or "manual", cam_name)
     rag_res = rag_engine.search_sop(req.state, preset_id)
