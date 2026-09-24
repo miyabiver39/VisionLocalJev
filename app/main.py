@@ -3,7 +3,8 @@ import asyncio
 import logging
 import json
 import time
-from typing import Set, Optional, Dict, Any, List
+from collections import deque
+from typing import Set, Optional, Dict, Any, List, Deque
 from contextlib import asynccontextmanager
 
 import base64
@@ -16,13 +17,14 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
-from app.camera import camera_manager, CameraDevice
+from app.camera import camera_manager
 from app.vision import VisionExtractor
 from app.decision import DecisionEngine
 from app.webhook import webhook_dispatcher, WebhookConfig
 from app.rag import rag_engine, SOPDocument
 from app.visual_rag import visual_rag_engine
 from app.metrics import metrics_tracker
+from app.security import BasicAuthMiddleware, load_credentials, validate_http_url
 
 # Configure Logging
 logging.basicConfig(
@@ -41,6 +43,8 @@ DJEV_DIFFUSION_STEPS = int(os.getenv("DJEV_DIFFUSION_STEPS", "8"))
 SAMPLE_FPS = float(os.getenv("SAMPLE_FPS", "1.0"))
 ALERT_THRESHOLD = float(os.getenv("ALERT_THRESHOLD", "0.80"))
 RAG_SERVER_URL = os.getenv("RAG_SERVER_URL", "")
+MAX_UPLOAD_IMAGE_BYTES = int(os.getenv("MAX_UPLOAD_IMAGE_BYTES", str(10 * 1024 * 1024)))
+AUTH_CREDENTIALS = load_credentials()
 
 # Global Components
 vision_extractor: Optional[VisionExtractor] = None
@@ -49,7 +53,8 @@ active_connections: Set[WebSocket] = set()
 pipeline_task: Optional[asyncio.Task] = None
 
 # Recent alert event log (in-memory, up to 100 entries)
-recent_event_log: List[Dict[str, Any]] = []
+MAX_EVENT_LOG = 100
+recent_event_log: Deque[Dict[str, Any]] = deque(maxlen=MAX_EVENT_LOG)
 
 # Manual scenario freeze / override state: camera_id -> {state, preset_id, expires_at}
 scenario_overrides: Dict[str, Dict[str, Any]] = {}
@@ -110,6 +115,14 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Vision-Jev Guard Platform", version="0.2.0", lifespan=lifespan)
 
+# Optional HTTP Basic auth for all HTTP + WebSocket routes (AUTH_USERNAME / AUTH_PASSWORD)
+app.add_middleware(BasicAuthMiddleware, credentials=AUTH_CREDENTIALS)
+if AUTH_CREDENTIALS is None:
+    logger.warning(
+        "AUTH_USERNAME / AUTH_PASSWORD are not set: the dashboard, camera feeds and APIs are "
+        "accessible without authentication. Set them before exposing this server on a network."
+    )
+
 # Mount static files and templates
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 templates = Jinja2Templates(directory="app/templates")
@@ -162,6 +175,19 @@ class VisualRAGRegisterRequest(BaseModel):
     description: Optional[str] = ""
 
 
+# ===================== Validation Helpers =====================
+
+def is_valid_preset(preset_id: Optional[str]) -> bool:
+    return bool(preset_id) and decision_engine is not None and preset_id in decision_engine.presets
+
+
+def require_valid_preset(preset_id: Optional[str]):
+    """Raises HTTP 400 if the preset id is unknown to the decision engine."""
+    if not is_valid_preset(preset_id):
+        available = sorted(decision_engine.presets.keys()) if decision_engine else []
+        raise HTTPException(status_code=400, detail=f"Unknown preset_id '{preset_id}'. Available: {available}")
+
+
 # ===================== WebSocket & Broadcast =====================
 
 async def broadcast_ws(message: dict):
@@ -181,6 +207,156 @@ async def broadcast_ws(message: dict):
 
 
 # ===================== Background Inference Pipeline =====================
+
+async def process_sample(cam_id: str, frame: np.ndarray, preset_id: str, has_motion: bool) -> Optional[Dict[str, Any]]:
+    """Runs one camera sample through Vision -> DJev -> SOP RAG -> Visual RAG -> Webhook -> WS broadcast.
+
+    Returns the composite result broadcast to the WebUI, or None if the sample was skipped.
+    """
+    cam = camera_manager.get_camera(cam_id)
+    cam_name = cam.name if cam else cam_id
+
+    loop = asyncio.get_running_loop()
+
+    # Check if this camera has an active manual test scenario override
+    now = time.time()
+    active_override = scenario_overrides.get(cam_id)
+    is_scenario_override = False
+    remaining_override_sec = 0
+
+    if active_override:
+        if now < active_override.get("expires_at", 0):
+            preset_id = active_override.get("preset_id", preset_id)
+            is_scenario_override = True
+            remaining_override_sec = max(1, int(active_override["expires_at"] - now))
+        else:
+            scenario_overrides.pop(cam_id, None)
+
+    # 1. Vision State Extraction
+    t0 = time.time()
+    vision_res = await loop.run_in_executor(
+        None, vision_extractor.extract_state, frame, preset_id, cam_id
+    )
+    state_text = active_override["state"] if is_scenario_override else vision_res["state"]
+    if is_scenario_override:
+        has_motion = True
+    vision_latency = vision_res["latency_ms"]
+
+    # 2. Decision Engine Evaluation (DiffusionGemma-Jev Multimodal Evaluation)
+    decision_res = await loop.run_in_executor(
+        None, decision_engine.evaluate_multimodal, frame, preset_id, cam_id, cam_name, state_text
+    )
+    if "error" in decision_res:
+        # Misconfigured preset: skip this sample instead of stalling the whole loop
+        logger.warning(f"Skipping inference for camera '{cam_id}': {decision_res['error']}")
+        return None
+    decision_latency = decision_res["latency_ms"]
+
+    # 3. RAG Knowledge Retrieval (Standard Operating Procedure)
+    rag_res = await loop.run_in_executor(
+        None, rag_engine.search_sop, state_text, preset_id
+    )
+    rag_latency = rag_res.get("latency_ms", 0.0)
+    sop_action = rag_res.get("sop")
+
+    # 3.5 Visual Example RAG (Image-based cosine reference matching)
+    visual_rag_res = await loop.run_in_executor(
+        None, visual_rag_engine.match_frame, frame, preset_id
+    )
+    # If Visual RAG found a high-confidence anomaly reference with linked SOP, prioritize it
+    if visual_rag_res.get("is_anomalous") and (visual_rag_res.get("top_match") or {}).get("sop_id"):
+        linked_sop_id = visual_rag_res["top_match"]["sop_id"]
+        linked_sop = rag_engine.documents.get(linked_sop_id)
+        if linked_sop:
+            sop_action = linked_sop.model_dump()
+            rag_res["matched"] = True
+            rag_res["source"] = "visual_example_rag"
+            rag_res["relevance_score"] = visual_rag_res["similarity"]
+
+    # 4. Metrics & Telemetry Update
+    visual_anomalous = bool(visual_rag_res.get("is_anomalous", False))
+    is_alert = decision_res["is_alert"] or visual_anomalous
+    alert_score = decision_res["score"]
+    alert_reason = ""
+    if decision_res["is_alert"]:
+        alert_reason = decision_res["alert_reason"]
+    elif visual_anomalous:
+        top_title = (visual_rag_res.get("top_match") or {}).get("title", "")
+        alert_reason = f"Visual Anomaly: {top_title}" if top_title else "Visual Anomaly detected"
+        # Visual-only alerts carry the anomaly score so webhook min_score filters don't drop them
+        alert_score = max(alert_score, float(visual_rag_res.get("anomaly_score", 0.0)))
+    metrics_tracker.update_inference_telemetry(
+        vision_latency, decision_latency, rag_latency, is_alert
+    )
+
+    # 5. Composite Event Assembly
+    time_now = time.time()
+    time_str = time.strftime("%H:%M:%S", time.localtime(time_now))
+    composite_result = {
+        "type": "decision_update",
+        "timestamp": time_now,
+        "time_str": time_str,
+        "camera_id": cam_id,
+        "camera_name": cam_name,
+        "preset_id": preset_id,
+        "preset_name": decision_res.get("preset_name", preset_id),
+        "state": state_text,
+        "has_motion": has_motion,
+        "is_scenario_override": is_scenario_override,
+        "remaining_override_sec": remaining_override_sec,
+        "vision": {
+            "latency_ms": vision_latency,
+            "mode": vision_res["mode"]
+        },
+        "decision": {
+            "latency_ms": decision_latency,
+            "engine": "diffusion-gemma-jev",
+            "decisions": decision_res["decisions"],
+            "score": decision_res["score"],
+            "is_alert": is_alert,
+            "alert_reason": alert_reason,
+            "alert_threshold": decision_res["alert_threshold"],
+            "djev": decision_res.get("djev", {})
+        },
+        "visual_rag": {
+            "top_match": visual_rag_res.get("top_match"),
+            "similarity": visual_rag_res.get("similarity", 0.0),
+            "anomaly_score": visual_rag_res.get("anomaly_score", 0.0),
+            "is_anomalous": visual_rag_res.get("is_anomalous", False),
+            "latency_ms": visual_rag_res.get("latency_ms", 0.0)
+        },
+        "rag": {
+            "source": rag_res.get("source", "embedded_rag"),
+            "matched": rag_res.get("matched", False),
+            "relevance_score": rag_res.get("relevance_score", 0.0),
+            "latency_ms": rag_latency,
+            "sop": sop_action
+        },
+        "metrics": metrics_tracker.get_system_metrics()
+    }
+
+    # 6. If Alert Triggered, Dispatch WebHook and Record History
+    if is_alert:
+        alert_payload = {
+            "camera_id": cam_id,
+            "camera_name": cam_name,
+            "state": state_text,
+            "score": alert_score,
+            "confidence": alert_score,
+            "alert_reason": alert_reason,
+            "timestamp": time_now,
+            "time_str": time_str,
+            "sop_action": sop_action
+        }
+        webhook_dispatcher.dispatch_alert_async(alert_payload)
+
+        # Record in-memory event log (bounded by deque maxlen)
+        recent_event_log.append(alert_payload)
+
+    # 7. Broadcast Telemetry to connected WebUI clients
+    await broadcast_ws(composite_result)
+    return composite_result
+
 
 async def multi_camera_inference_loop():
     """
@@ -202,142 +378,21 @@ async def multi_camera_inference_loop():
             cam_id, frame, preset_id, has_motion = sample
             metrics_tracker.record_frame_sampled()
 
-            cam = camera_manager.get_camera(cam_id)
-            cam_name = cam.name if cam else cam_id
-
-            loop = asyncio.get_running_loop()
-
-            # Check if this camera has an active manual test scenario override
-            now = time.time()
-            active_override = scenario_overrides.get(cam_id)
-            is_scenario_override = False
-            remaining_override_sec = 0
-
-            if active_override:
-                if now < active_override.get("expires_at", 0):
-                    preset_id = active_override.get("preset_id", preset_id)
-                    is_scenario_override = True
-                    remaining_override_sec = max(1, int(active_override["expires_at"] - now))
-                else:
-                    scenario_overrides.pop(cam_id, None)
-
-            # 1. Vision State Extraction
-            t0 = time.time()
-            vision_res = await loop.run_in_executor(
-                None, vision_extractor.extract_state, frame, preset_id
-            )
-            state_text = active_override["state"] if is_scenario_override else vision_res["state"]
-            if is_scenario_override:
-                has_motion = True
-            vision_latency = vision_res["latency_ms"]
-
-            # 2. Decision Engine Evaluation (DiffusionGemma-Jev Multimodal Evaluation)
-            decision_res = await loop.run_in_executor(
-                None, decision_engine.evaluate_multimodal, frame, preset_id, cam_id, cam_name, state_text
-            )
-            decision_latency = decision_res["latency_ms"]
-
-            # 3. RAG Knowledge Retrieval (Standard Operating Procedure)
-            rag_res = await loop.run_in_executor(
-                None, rag_engine.search_sop, state_text, preset_id
-            )
-            rag_latency = rag_res.get("latency_ms", 0.0)
-            sop_action = rag_res.get("sop")
-
-            # 3.5 Visual Example RAG (Image-based cosine reference matching)
-            visual_rag_res = await loop.run_in_executor(
-                None, visual_rag_engine.match_frame, frame, preset_id
-            )
-            # If Visual RAG found a high-confidence anomaly reference with linked SOP, prioritize it
-            if visual_rag_res.get("is_anomalous") and visual_rag_res.get("top_match", {}).get("sop_id"):
-                linked_sop_id = visual_rag_res["top_match"]["sop_id"]
-                linked_sop = rag_engine.documents.get(linked_sop_id)
-                if linked_sop:
-                    sop_action = linked_sop.to_dict()
-                    rag_res["matched"] = True
-                    rag_res["source"] = "visual_example_rag"
-                    rag_res["relevance_score"] = visual_rag_res["similarity"]
-
-            # 4. Metrics & Telemetry Update
-            is_alert = decision_res["is_alert"] or visual_rag_res.get("is_anomalous", False)
-            metrics_tracker.update_inference_telemetry(
-                vision_latency, decision_latency, rag_latency, is_alert
-            )
-
-            # 5. Composite Event Assembly
-            time_now = time.time()
-            time_str = time.strftime("%H:%M:%S", time.localtime(time_now))
-            composite_result = {
-                "type": "decision_update",
-                "timestamp": time_now,
-                "time_str": time_str,
-                "camera_id": cam_id,
-                "camera_name": cam_name,
-                "preset_id": preset_id,
-                "preset_name": decision_res.get("preset_name", preset_id),
-                "state": state_text,
-                "has_motion": has_motion,
-                "is_scenario_override": is_scenario_override,
-                "remaining_override_sec": remaining_override_sec,
-                "vision": {
-                    "latency_ms": vision_latency,
-                    "mode": vision_res["mode"]
-                },
-                "decision": {
-                    "latency_ms": decision_latency,
-                    "engine": "diffusion-gemma-jev",
-                    "decisions": decision_res["decisions"],
-                    "score": decision_res["score"],
-                    "is_alert": is_alert,
-                    "alert_reason": decision_res["alert_reason"] or ("Visual Anomaly: " + (visual_rag_res.get("top_match", {}).get("title", ""))),
-                    "alert_threshold": decision_res["alert_threshold"],
-                    "djev": decision_res.get("djev", {})
-                },
-                "visual_rag": {
-                    "top_match": visual_rag_res.get("top_match"),
-                    "similarity": visual_rag_res.get("similarity", 0.0),
-                    "anomaly_score": visual_rag_res.get("anomaly_score", 0.0),
-                    "is_anomalous": visual_rag_res.get("is_anomalous", False),
-                    "latency_ms": visual_rag_res.get("latency_ms", 0.0)
-                },
-                "rag": {
-                    "source": rag_res.get("source", "embedded_rag"),
-                    "matched": rag_res.get("matched", False),
-                    "relevance_score": rag_res.get("relevance_score", 0.0),
-                    "latency_ms": rag_latency,
-                    "sop": sop_action
-                },
-                "metrics": metrics_tracker.get_system_metrics()
-            }
-
-            # 6. If Alert Triggered, Dispatch WebHook and Record History
-            if is_alert:
-                alert_payload = {
-                    "camera_id": cam_id,
-                    "camera_name": cam_name,
-                    "state": state_text,
-                    "score": decision_res["score"],
-                    "confidence": decision_res["score"],
-                    "alert_reason": decision_res["alert_reason"],
-                    "timestamp": time_now,
-                    "time_str": time_str,
-                    "sop_action": sop_action
-                }
-                webhook_dispatcher.dispatch_alert_async(alert_payload)
-
-                # Record in-memory event log
-                recent_event_log.append(alert_payload)
-                if len(recent_event_log) > 100:
-                    recent_event_log.pop(0)
-
-            # 7. Broadcast Telemetry to connected WebUI clients
-            await broadcast_ws(composite_result)
+            await process_sample(cam_id, frame, preset_id, has_motion)
 
         except asyncio.CancelledError:
             break
         except Exception as e:
             logger.error(f"Error in multi-camera pipeline loop: {e}", exc_info=True)
             await asyncio.sleep(1.0)
+
+
+# ===================== Health Check =====================
+
+@app.get("/healthz")
+async def healthz():
+    """Liveness probe (exempt from Basic auth so container health checks work)."""
+    return {"status": "ok"}
 
 
 # ===================== UI Dashboard Route =====================
@@ -372,39 +427,49 @@ async def index_page(request: Request):
 
 # ===================== Video Streaming Routes =====================
 
-def mjpeg_generator(camera_id: str):
-    """MJPEG stream frame generator for a specific camera."""
+async def mjpeg_generator(camera_id: str, request: Optional[Request] = None):
+    """Async MJPEG stream frame generator for a specific camera.
+
+    Runs on the event loop (no worker thread is held per viewer) and terminates
+    when the camera is removed or the client disconnects.
+    """
+    last_sent: Optional[bytes] = None
     while True:
+        if request is not None and await request.is_disconnected():
+            break
         cam = camera_manager.get_camera(camera_id)
-        if cam is not None:
-            jpeg_bytes = cam.get_latest_jpeg()
-            if jpeg_bytes:
-                yield (
-                    b"--frame\r\n"
-                    b"Content-Type: image/jpeg\r\n\r\n" + jpeg_bytes + b"\r\n"
-                )
-        time.sleep(0.04)  # ~25 FPS stream rate
+        if cam is None:
+            break
+        jpeg_bytes = cam.get_latest_jpeg()
+        if jpeg_bytes and jpeg_bytes is not last_sent:
+            last_sent = jpeg_bytes
+            yield (
+                b"--frame\r\n"
+                b"Content-Type: image/jpeg\r\n\r\n" + jpeg_bytes + b"\r\n"
+            )
+        await asyncio.sleep(0.04)  # ~25 FPS stream rate
 
 
 @app.get("/api/cameras/{cam_id}/feed")
-async def camera_feed(cam_id: str):
+async def camera_feed(cam_id: str, request: Request):
     """Streams MJPEG video feed for the specified camera."""
     cam = camera_manager.get_camera(cam_id)
     if not cam:
         raise HTTPException(status_code=404, detail=f"Camera '{cam_id}' not found")
     return StreamingResponse(
-        mjpeg_generator(cam_id),
+        mjpeg_generator(cam_id, request),
         media_type="multipart/x-mixed-replace; boundary=frame"
     )
 
 
 @app.get("/video_feed")
-async def default_video_feed():
+async def default_video_feed(request: Request):
     """Default fallback video feed routing to the first available camera."""
     cameras = camera_manager.get_all_cameras()
-    cam_id = cameras[0].camera_id if cameras else "cam_main"
+    if not cameras:
+        raise HTTPException(status_code=404, detail="No camera registered")
     return StreamingResponse(
-        mjpeg_generator(cam_id),
+        mjpeg_generator(cameras[0].camera_id, request),
         media_type="multipart/x-mixed-replace; boundary=frame"
     )
 
@@ -435,12 +500,14 @@ async def websocket_endpoint(websocket: WebSocket):
                 action = msg.get("action")
                 if action == "select_preset":
                     preset_id = msg.get("preset_id")
+                    if not is_valid_preset(preset_id):
+                        continue
                     cam_id = msg.get("camera_id")
                     if cam_id:
                         camera_manager.update_camera_preset(cam_id, preset_id)
                     else:
                         for c in camera_manager.get_all_cameras():
-                            c.preset_id = preset_id
+                            camera_manager.update_camera_preset(c.camera_id, preset_id)
                     await broadcast_ws({
                         "type": "cameras_updated",
                         "cameras": camera_manager.get_all_status()
@@ -483,6 +550,12 @@ async def list_cameras():
 @app.post("/api/cameras")
 async def add_camera(req: CameraCreateRequest):
     """Registers and starts a new camera (RTSP, JPEG URL, Webcam, or Synthetic)."""
+    require_valid_preset(req.preset_id)
+    if req.source_type.lower() == "jpeg_url":
+        try:
+            validate_http_url(req.source_url)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
     try:
         cam = camera_manager.add_camera(
             camera_id=req.camera_id,
@@ -517,13 +590,17 @@ async def update_camera(cam_id: str, req: CameraUpdateRequest):
     if not cam:
         raise HTTPException(status_code=404, detail="Camera not found")
 
+    if req.preset_id is not None:
+        require_valid_preset(req.preset_id)
+    if req.sample_fps is not None and req.sample_fps <= 0:
+        raise HTTPException(status_code=400, detail="sample_fps must be greater than 0")
+
     if req.name is not None:
         cam.name = req.name
     if req.preset_id is not None:
         cam.preset_id = req.preset_id
     if req.sample_fps is not None:
-        cam.sample_fps = req.sample_fps
-        cam.sample_interval = 1.0 / cam.sample_fps
+        cam.set_sample_fps(req.sample_fps)
 
     await broadcast_ws({
         "type": "cameras_updated",
@@ -538,6 +615,8 @@ async def delete_camera(cam_id: str):
     success = camera_manager.remove_camera(cam_id)
     if not success:
         raise HTTPException(status_code=404, detail="Camera not found")
+    if vision_extractor:
+        vision_extractor.reset_camera(cam_id)
 
     await broadcast_ws({
         "type": "cameras_updated",
@@ -632,6 +711,7 @@ async def trigger_manual_scenario(req: ManualTriggerRequest):
     cam = camera_manager.get_camera(req.camera_id or "cam_main")
     cam_name = cam.name if cam else (req.camera_id or "Manual Injection")
     preset_id = req.preset_id or "security"
+    require_valid_preset(preset_id)
 
     eval_res = decision_engine.evaluate(req.state, preset_id, req.camera_id or "manual", cam_name)
     rag_res = rag_engine.search_sop(req.state, preset_id)
@@ -697,6 +777,9 @@ async def register_visual_reference(req: VisualRAGRegisterRequest):
         b64_str = req.image_base64
         if "," in b64_str:
             b64_str = b64_str.split(",", 1)[1]
+        # Base64 inflates by 4/3: reject oversized payloads before decoding
+        if len(b64_str) * 3 // 4 > MAX_UPLOAD_IMAGE_BYTES:
+            raise HTTPException(status_code=413, detail=f"Image exceeds {MAX_UPLOAD_IMAGE_BYTES} bytes")
         img_bytes = base64.b64decode(b64_str)
         img_arr = np.frombuffer(img_bytes, dtype=np.uint8)
         frame = cv2.imdecode(img_arr, cv2.IMREAD_COLOR)
@@ -712,6 +795,8 @@ async def register_visual_reference(req: VisualRAGRegisterRequest):
             description=req.description or ""
         )
         return JSONResponse({"success": True, "reference": ref.to_dict()})
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 

@@ -1,14 +1,46 @@
 import time
 import re
 import os
-import json
 import logging
 import requests
-import numpy as np
 from typing import Dict, Any, List, Optional
 from pydantic import BaseModel
 
 logger = logging.getLogger("vision_jev.rag")
+
+# Short / function words must never count as keyword evidence (e.g. "a" is a substring of almost everything)
+MIN_TOKEN_LEN = 3
+STOPWORDS = {
+    "the", "and", "are", "for", "with", "near", "from", "into", "onto", "over",
+    "this", "that", "has", "have", "been", "being", "was", "were", "any", "area",
+}
+NEGATIONS = ["no ", "not ", "non-", "never ", "without ", "clear of ", "free of ", "no visible "]
+
+
+def _contains_unnegated(text: str, phrase: str) -> bool:
+    """True if `phrase` occurs in `text` at least once without a preceding negation word."""
+    pos = 0
+    while True:
+        idx = text.find(phrase, pos)
+        if idx == -1:
+            return False
+        prefix = text[max(0, idx - 25):idx]
+        if not any(neg in prefix for neg in NEGATIONS):
+            return True
+        pos = idx + len(phrase)
+
+
+def _keyword_token_hit(kw_lower: str, q_tokens: set, query_lower: str) -> bool:
+    """Word-level match: every word of the keyword matches a query token exactly or as a stem prefix
+    (e.g. keyword "loiter" matches "loitering"). Negated occurrences are ignored."""
+    kw_words = [w for w in re.findall(r"\w+", kw_lower) if len(w) >= MIN_TOKEN_LEN]
+    if not kw_words:
+        return False
+    for w in kw_words:
+        hits = [t for t in q_tokens if t == w or t.startswith(w)]
+        if not any(_contains_unnegated(query_lower, t) for t in hits):
+            return False
+    return True
 
 
 class SOPDocument(BaseModel):
@@ -282,7 +314,11 @@ class RAGEngine:
 
     def _embedded_hybrid_search(self, query_text: str, category: Optional[str]) -> tuple[Optional[SOPDocument], float]:
         """Performs lexical and token-overlap relevance scoring against SOP documents."""
-        q_tokens = set(re.findall(r"\w+", query_text.lower()))
+        query_lower = query_text.lower()
+        q_tokens = {
+            t for t in re.findall(r"\w+", query_lower)
+            if len(t) >= MIN_TOKEN_LEN and t not in STOPWORDS
+        }
         best_doc = None
         highest_score = 0.0
 
@@ -291,12 +327,12 @@ class RAGEngine:
                 continue
 
             score = 0.0
-            # Keyword weight
+            # Keyword weight: full phrase hit (non-negated) > word-level stem hit
             for kw in doc.trigger_keywords:
                 kw_lower = kw.lower()
-                if kw_lower in query_text.lower():
+                if _contains_unnegated(query_lower, kw_lower):
                     score += 3.0
-                elif any(t in kw_lower for t in q_tokens):
+                elif _keyword_token_hit(kw_lower, q_tokens, query_lower):
                     score += 1.0
 
             # Priority boost

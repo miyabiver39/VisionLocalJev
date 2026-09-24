@@ -2,10 +2,23 @@ import time
 import cv2
 import numpy as np
 import logging
+import threading
 from typing import Optional, Dict, Any, List
 from PIL import Image
 
 logger = logging.getLogger("vision_jev.vision")
+
+
+class _CameraTrackState:
+    """Per-camera detector state (background model + loitering tracker)."""
+
+    def __init__(self):
+        self.bg_subtractor = cv2.createBackgroundSubtractorMOG2(
+            history=300, varThreshold=25, detectShadows=True
+        )
+        self.lingering_frames = 0
+        self.last_center = None
+        self.lock = threading.Lock()
 
 
 class VisionExtractor:
@@ -43,14 +56,10 @@ class VisionExtractor:
         self.model_name = model_name
         self.step_counter = 0
 
-        # Background Subtractor for robust, real-time object/motion tracking
-        self.bg_subtractor = cv2.createBackgroundSubtractorMOG2(
-            history=300, varThreshold=25, detectShadows=True
-        )
-
-        # Activity Tracking
-        self.lingering_frames = 0
-        self.last_center = None
+        # Background model and loitering tracker are kept per camera so that
+        # round-robin frames from different scenes never share state.
+        self._track_states: Dict[str, _CameraTrackState] = {}
+        self._states_lock = threading.Lock()
 
         # Optional VLM
         self.vlm_model = None
@@ -78,7 +87,20 @@ class VisionExtractor:
             logger.warning(f"Failed to load VLM ({e}). Falling back to 'detector' mode.")
             self.mode = "detector"
 
-    def extract_state(self, frame: np.ndarray, preset_id: str = "security") -> Dict[str, Any]:
+    def _get_track_state(self, camera_id: str) -> _CameraTrackState:
+        with self._states_lock:
+            state = self._track_states.get(camera_id)
+            if state is None:
+                state = _CameraTrackState()
+                self._track_states[camera_id] = state
+            return state
+
+    def reset_camera(self, camera_id: str):
+        """Drops the detector state of a removed/reconfigured camera."""
+        with self._states_lock:
+            self._track_states.pop(camera_id, None)
+
+    def extract_state(self, frame: np.ndarray, preset_id: str = "security", camera_id: str = "default") -> Dict[str, Any]:
         """
         Extracts visual state sentence from the provided frame and renders real detection boxes.
         Returns: { state: str, latency_ms: float, mode: str, detections: dict }
@@ -89,7 +111,9 @@ class VisionExtractor:
         if self.mode == "vlm" and self.vlm_model is not None:
             state_text = self._extract_with_vlm(frame)
         elif self.mode == "detector":
-            state_text, detections = self._extract_with_detector(frame, preset_id)
+            track = self._get_track_state(camera_id)
+            with track.lock:
+                state_text, detections = self._extract_with_detector(frame, preset_id, track)
         else:
             state_text = self._extract_with_mock(preset_id)
 
@@ -103,20 +127,21 @@ class VisionExtractor:
             "timestamp": time.time()
         }
 
-    def _extract_with_detector(self, frame: np.ndarray, preset_id: str) -> tuple[str, dict]:
+    def _extract_with_detector(self, frame: np.ndarray, preset_id: str, track: _CameraTrackState) -> tuple[str, dict]:
         """
         Performs genuine visual analysis on the frame using CPU-friendly CV algorithms:
           1. Foreground motion & object segmentation (MOG2)
           2. Morphological filtering & contour geometry classification (Person vs Object vs Vehicle)
           3. Flame & Smoke spectral analysis (HSV color space)
-        Draws bounding boxes and labels directly on the streaming frame.
+        The input frame is never modified (it is shared with the decision engine and
+        Visual RAG); bounding boxes are returned in `detections["boxes"]` instead.
         """
         h, w = frame.shape[:2]
         small_w, small_h = 640, 360
         small = cv2.resize(frame, (small_w, small_h))
 
         # 1. Background subtraction mask
-        fg_mask = self.bg_subtractor.apply(small)
+        fg_mask = track.bg_subtractor.apply(small)
         # Filter out shadows (gray value 127 in MOG2)
         _, fg_thresh = cv2.threshold(fg_mask, 200, 255, cv2.THRESH_BINARY)
 
@@ -134,6 +159,7 @@ class VisionExtractor:
 
         max_contour_area = 0
         active_center = None
+        boxes: List[Dict[str, Any]] = []
 
         for c in contours:
             area = cv2.contourArea(c)
@@ -153,33 +179,27 @@ class VisionExtractor:
             # Aspect ratio > 1.25 typically denotes an upright person/pedestrian
             if aspect_ratio >= 1.25 and area > 900:
                 detected_persons += 1
-                box_color = (0, 255, 100)  # Green
-                label = f"PERSON [{int(area)}px]"
+                label = "person"
             else:
                 detected_objects += 1
-                box_color = (0, 200, 255)  # Amber/Cyan
-                label = f"OBJECT/MOTION [{int(area)}px]"
+                label = "object"
 
             active_center = (ox + ow // 2, oy + oh // 2)
-
-            # Draw visual bounding box onto live video stream
-            cv2.rectangle(frame, (ox, oy), (ox + ow, oy + oh), box_color, 2)
-            cv2.putText(frame, label, (ox, max(15, oy - 6)),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.45, box_color, 1, cv2.LINE_AA)
+            boxes.append({"label": label, "x": ox, "y": oy, "w": ow, "h": oh, "area": int(area)})
 
         # 3. Lingering / Loitering Detection
         is_lingering = False
-        if active_center is not None and self.last_center is not None:
-            dist = np.hypot(active_center[0] - self.last_center[0], active_center[1] - self.last_center[1])
+        if active_center is not None and track.last_center is not None:
+            dist = np.hypot(active_center[0] - track.last_center[0], active_center[1] - track.last_center[1])
             if dist < 40 and max_contour_area > 800:
-                self.lingering_frames += 1
+                track.lingering_frames += 1
             else:
-                self.lingering_frames = max(0, self.lingering_frames - 1)
+                track.lingering_frames = max(0, track.lingering_frames - 1)
         else:
-            self.lingering_frames = max(0, self.lingering_frames - 1)
+            track.lingering_frames = max(0, track.lingering_frames - 1)
 
-        self.last_center = active_center
-        if self.lingering_frames >= 4:
+        track.last_center = active_center
+        if track.lingering_frames >= 4:
             is_lingering = True
 
         # 4. Fire / Smoke Hue Analysis (Restricted strictly to active moving regions to avoid false positives on static dark machinery/floors)
@@ -220,7 +240,8 @@ class VisionExtractor:
             "motion_pixels": int(motion_pixel_count),
             "is_lingering": is_lingering,
             "fire_ratio": round(fire_ratio, 4),
-            "smoke_ratio": round(smoke_ratio, 4)
+            "smoke_ratio": round(smoke_ratio, 4),
+            "boxes": boxes
         }
 
         # 5. Synthesize Genuine State Description

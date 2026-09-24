@@ -6,6 +6,23 @@
 let ws = null;
 let cameras = [];
 let currentLayout = "2"; // 1 | 2 | auto
+let presetList = [];     // [{id, name, ...}] loaded from /api/presets
+
+/** Escapes a value for safe interpolation into HTML text or quoted attribute values. */
+function escapeHtml(value) {
+    return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+}
+
+/** Only allow inline image data URLs / same-origin paths as <img src>. */
+function safeImageSrc(src) {
+    const s = String(src || "");
+    return /^data:image\/(png|jpe?g|gif|webp);base64,[A-Za-z0-9+/=]+$/.test(s) || s.startsWith("/") ? s : "";
+}
 
 document.addEventListener("DOMContentLoaded", () => {
     initPresetSelector();
@@ -14,8 +31,9 @@ document.addEventListener("DOMContentLoaded", () => {
     initModals();
     initVisualRAGModal();
     initQuickTestButtons();
+    initDelegatedActions();
     connectWebSocket();
-    fetchCameras();
+    fetchPresets().then(fetchCameras);
     fetchWebhooks();
     fetchRAGDocs();
     fetchVisualRAGReferences();
@@ -41,6 +59,22 @@ function initThresholdSelector() {
 
 function initPresetSelector() {
     // Optional global preset selector if present
+}
+
+async function fetchPresets() {
+    try {
+        const resp = await fetch("/api/presets");
+        presetList = await resp.json();
+    } catch (e) {
+        console.error("Failed to fetch presets:", e);
+    }
+}
+
+function renderPresetOptions(selectedId) {
+    const list = presetList.length ? presetList : [{ id: selectedId, name: selectedId }];
+    return list.map(p =>
+        `<option value="${escapeHtml(p.id)}" ${p.id === selectedId ? 'selected' : ''}>${escapeHtml(p.name)}</option>`
+    ).join("");
 }
 
 // ===================== WebSocket & Telemetry =====================
@@ -248,7 +282,7 @@ function renderChoiceCard(q) {
                 <div class="flex justify-between text-xs">
                     <span class="${textColor} flex items-center gap-1.5">
                         ${isSelected ? '<span class="inline-block w-1.5 h-1.5 rounded-full bg-indigo-400"></span>' : ''}
-                        ${choice}
+                        ${escapeHtml(choice)}
                     </span>
                     <span class="text-slate-400 font-mono">${pct}%</span>
                 </div>
@@ -264,7 +298,7 @@ function renderChoiceCard(q) {
             <div class="flex items-center justify-between mb-2.5">
                 <div class="flex items-center gap-2">
                     <span class="px-2 py-0.5 text-[10px] font-bold rounded bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 uppercase">CHOICE</span>
-                    <h3 class="text-xs font-semibold text-slate-200">${q.label}</h3>
+                    <h3 class="text-xs font-semibold text-slate-200">${escapeHtml(q.label)}</h3>
                 </div>
                 <span class="text-xs text-slate-400 font-mono">Conf: ${(q.confidence * 100).toFixed(1)}%</span>
             </div>
@@ -294,7 +328,7 @@ function renderScoreCard(q) {
             <div class="flex items-center justify-between mb-2">
                 <div class="flex items-center gap-2">
                     <span class="px-2 py-0.5 text-[10px] font-bold rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 uppercase">SCORE</span>
-                    <h3 class="text-xs font-semibold text-slate-200">${q.label}</h3>
+                    <h3 class="text-xs font-semibold text-slate-200">${escapeHtml(q.label)}</h3>
                 </div>
                 <span class="text-xs text-slate-400 font-mono">Conf: ${(q.confidence * 100).toFixed(1)}%</span>
             </div>
@@ -305,7 +339,7 @@ function renderScoreCard(q) {
             <div class="w-full bg-slate-800 rounded-full h-2 overflow-hidden mb-1.5">
                 <div class="${barColor} h-2 rounded-full transition-all duration-300" style="width: ${pct}%"></div>
             </div>
-            ${q.rubric ? `<p class="text-[10px] text-slate-400 italic">${q.rubric}</p>` : ''}
+            ${q.rubric ? `<p class="text-[10px] text-slate-400 italic">${escapeHtml(q.rubric)}</p>` : ''}
         </div>
     `;
 }
@@ -323,7 +357,7 @@ function renderNoulCard(q) {
             <div class="flex items-center justify-between mb-2">
                 <div class="flex items-center gap-2">
                     <span class="px-2 py-0.5 text-[10px] font-bold rounded bg-purple-500/20 text-purple-400 border border-purple-500/30 uppercase">NOUL</span>
-                    <h3 class="text-xs font-semibold text-slate-200">${q.label}</h3>
+                    <h3 class="text-xs font-semibold text-slate-200">${escapeHtml(q.label)}</h3>
                 </div>
                 <span class="px-2 py-0.5 text-xs font-semibold rounded border ${badgeColor}">
                     ${statusText}
@@ -338,7 +372,7 @@ function renderNoulCard(q) {
                     <div class="${isTrue ? 'bg-red-500' : 'bg-emerald-500'} h-1.5 rounded-full transition-all duration-300" style="width: ${truePct}%"></div>
                 </div>
             </div>
-            ${q.hypothesis ? `<p class="text-[10px] text-slate-400 italic">"${q.hypothesis}"</p>` : ''}
+            ${q.hypothesis ? `<p class="text-[10px] text-slate-400 italic">"${escapeHtml(q.hypothesis)}"</p>` : ''}
         </div>
     `;
 }
@@ -366,7 +400,7 @@ function renderRAGSOP(sop, score) {
         stepsEl.innerHTML = sop.procedure_steps.map(s => `
             <div class="flex items-start gap-1.5">
                 <span class="text-indigo-400 font-bold">&bull;</span>
-                <span>${s}</span>
+                <span>${escapeHtml(s)}</span>
             </div>
         `).join("");
     }
@@ -374,7 +408,7 @@ function renderRAGSOP(sop, score) {
     if (contactsEl && sop.emergency_contacts) {
         contactsEl.innerHTML = Object.entries(sop.emergency_contacts).map(([k, v]) => `
             <span class="px-2 py-1 rounded bg-slate-800/80 border border-slate-700 text-slate-300">
-                <strong class="text-slate-400">${k}:</strong> ${v}
+                <strong class="text-slate-400">${escapeHtml(k)}:</strong> ${escapeHtml(v)}
             </span>
         `).join("");
     }
@@ -413,30 +447,32 @@ function renderCamerasGrid(camList) {
     }
 
     container.innerHTML = cameras.map(cam => {
+        const camId = escapeHtml(cam.camera_id);
+        const camIdPath = escapeHtml(encodeURIComponent(cam.camera_id));
         const statusColor = cam.status === "ACTIVE"
             ? "text-emerald-400 bg-emerald-500/10 border-emerald-500/30"
             : (cam.status.includes("FALLBACK") ? "text-amber-400 bg-amber-500/10 border-amber-500/30" : "text-red-400 bg-red-500/10 border-red-500/30");
 
         return `
-            <div id="cam-box-${cam.camera_id}" class="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl flex flex-col transition-all duration-300 hover:border-slate-700">
+            <div id="cam-box-${camId}" class="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl flex flex-col transition-all duration-300 hover:border-slate-700">
                 <!-- Camera Header -->
                 <div class="px-3.5 py-2 bg-slate-850 border-b border-slate-800 flex items-center justify-between text-xs">
                     <div class="flex items-center gap-2 truncate">
                         <span class="w-2 h-2 rounded-full ${cam.status === 'ACTIVE' ? 'bg-emerald-500 animate-ping' : 'bg-amber-500'}"></span>
-                        <span class="font-bold text-slate-200 truncate">${cam.name}</span>
-                        <span class="text-[10px] font-mono text-slate-400">(${cam.camera_id})</span>
+                        <span class="font-bold text-slate-200 truncate">${escapeHtml(cam.name)}</span>
+                        <span class="text-[10px] font-mono text-slate-400">(${camId})</span>
                     </div>
                     <div class="flex items-center gap-2">
-                        <span class="px-2 py-0.5 text-[10px] font-mono rounded border ${statusColor}">${cam.status}</span>
-                        <button onclick="deleteCamera('${cam.camera_id}')" class="text-slate-500 hover:text-red-400 p-1" title="カメラ削除">&times;</button>
+                        <span class="px-2 py-0.5 text-[10px] font-mono rounded border ${statusColor}">${escapeHtml(cam.status)}</span>
+                        <button data-action="delete-camera" data-id="${camId}" class="text-slate-500 hover:text-red-400 p-1" title="カメラ削除">&times;</button>
                     </div>
                 </div>
 
                 <!-- Live Stream Video Frame -->
                 <div class="relative aspect-video bg-black flex items-center justify-center overflow-hidden">
-                    <img src="/api/cameras/${cam.camera_id}/feed" alt="${cam.name}" class="w-full h-full object-contain">
+                    <img src="/api/cameras/${camIdPath}/feed" alt="${escapeHtml(cam.name)}" class="w-full h-full object-contain">
                     <div class="absolute bottom-2 left-2 bg-black/60 backdrop-blur-sm px-2 py-0.5 rounded text-[10px] font-mono text-slate-300">
-                        ${cam.actual_fps} FPS &bull; ${cam.source_type.toUpperCase()}
+                        ${escapeHtml(cam.actual_fps)} FPS &bull; ${escapeHtml(String(cam.source_type).toUpperCase())}
                     </div>
                 </div>
 
@@ -444,7 +480,7 @@ function renderCamerasGrid(camList) {
                 <!-- Error / Fallback Notice Banner -->
                 <div class="px-3 py-1.5 bg-amber-950/70 border-t border-b border-amber-800/40 text-[10px] text-amber-200 flex items-start gap-1.5">
                     <svg class="w-3.5 h-3.5 text-amber-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
-                    <span class="leading-tight">${cam.error_message}</span>
+                    <span class="leading-tight">${escapeHtml(cam.error_message)}</span>
                 </div>
                 ` : ''}
 
@@ -452,13 +488,12 @@ function renderCamerasGrid(camList) {
                 <div class="p-3 bg-slate-900 flex items-center justify-between text-xs border-t border-slate-800/80">
                     <div class="flex items-center gap-1.5 text-slate-400">
                         <span>プリセット:</span>
-                        <select onchange="updateCameraPreset('${cam.camera_id}', this.value)" class="bg-slate-950 border border-slate-700 rounded px-2 py-1 text-slate-200 text-xs focus:outline-none cursor-pointer">
-                            <option value="security" ${cam.preset_id === 'security' ? 'selected' : ''}>防犯・立ち入り</option>
-                            <option value="fire_disaster" ${cam.preset_id === 'fire_disaster' ? 'selected' : ''}>火災・防災</option>
+                        <select data-action="update-camera-preset" data-id="${camId}" class="bg-slate-950 border border-slate-700 rounded px-2 py-1 text-slate-200 text-xs focus:outline-none cursor-pointer">
+                            ${renderPresetOptions(cam.preset_id)}
                         </select>
                     </div>
-                    <span class="text-[11px] font-mono text-slate-500 truncate max-w-[140px]" title="${cam.source_url}">
-                        ${cam.source_url}
+                    <span class="text-[11px] font-mono text-slate-500 truncate max-w-[140px]" title="${escapeHtml(cam.source_url)}">
+                        ${escapeHtml(cam.source_url)}
                     </span>
                 </div>
             </div>
@@ -469,7 +504,7 @@ function renderCamerasGrid(camList) {
 async function deleteCamera(camId) {
     if (!confirm(`カメラ '${camId}' を削除しますか？`)) return;
     try {
-        await fetch(`/api/cameras/${camId}`, { method: "DELETE" });
+        await fetch(`/api/cameras/${encodeURIComponent(camId)}`, { method: "DELETE" });
         fetchCameras();
     } catch (e) {
         console.error("Failed to delete camera:", e);
@@ -478,7 +513,7 @@ async function deleteCamera(camId) {
 
 async function updateCameraPreset(camId, presetId) {
     try {
-        await fetch(`/api/cameras/${camId}`, {
+        await fetch(`/api/cameras/${encodeURIComponent(camId)}`, {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ preset_id: presetId })
@@ -486,6 +521,25 @@ async function updateCameraPreset(camId, presetId) {
     } catch (e) {
         console.error("Failed to update camera preset:", e);
     }
+}
+
+// Event delegation for controls rendered from server data (no inline handlers with interpolated ids)
+function initDelegatedActions() {
+    document.addEventListener("click", (e) => {
+        const el = e.target.closest("[data-action]");
+        if (!el || el.tagName === "SELECT") return;
+        const id = el.dataset.id;
+        switch (el.dataset.action) {
+            case "delete-camera": deleteCamera(id); break;
+            case "test-webhook": testWebhook(id); break;
+            case "delete-webhook": deleteWebhook(id); break;
+            case "delete-visual-reference": deleteVisualReference(id); break;
+        }
+    });
+    document.addEventListener("change", (e) => {
+        const el = e.target.closest("[data-action='update-camera-preset']");
+        if (el) updateCameraPreset(el.dataset.id, el.value);
+    });
 }
 
 // ===================== Modals & Actions =====================
@@ -622,14 +676,14 @@ async function fetchWebhooks() {
             <div class="bg-slate-950/70 border border-slate-800 rounded-lg p-3 flex items-center justify-between text-xs">
                 <div>
                     <div class="flex items-center gap-2">
-                        <strong class="text-slate-200">${h.name}</strong>
-                        <span class="px-1.5 py-0.5 text-[10px] rounded bg-slate-800 text-slate-400 uppercase">${h.format}</span>
+                        <strong class="text-slate-200">${escapeHtml(h.name)}</strong>
+                        <span class="px-1.5 py-0.5 text-[10px] rounded bg-slate-800 text-slate-400 uppercase">${escapeHtml(h.format)}</span>
                     </div>
-                    <div class="text-slate-500 font-mono text-[11px] truncate max-w-xs mt-0.5">${h.url}</div>
+                    <div class="text-slate-500 font-mono text-[11px] truncate max-w-xs mt-0.5">${escapeHtml(h.url)}</div>
                 </div>
                 <div class="flex items-center gap-2">
-                    <button onclick="testWebhook('${h.id}')" class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-emerald-400 font-semibold text-[11px]">テスト送信</button>
-                    <button onclick="deleteWebhook('${h.id}')" class="text-slate-500 hover:text-red-400 text-base">&times;</button>
+                    <button data-action="test-webhook" data-id="${escapeHtml(h.id)}" class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-emerald-400 font-semibold text-[11px]">テスト送信</button>
+                    <button data-action="delete-webhook" data-id="${escapeHtml(h.id)}" class="text-slate-500 hover:text-red-400 text-base">&times;</button>
                 </div>
             </div>
         `).join("");
@@ -640,7 +694,7 @@ async function fetchWebhooks() {
 
 async function testWebhook(webhookId) {
     try {
-        const resp = await fetch(`/api/webhooks/${webhookId}/test`, { method: "POST" });
+        const resp = await fetch(`/api/webhooks/${encodeURIComponent(webhookId)}/test`, { method: "POST" });
         const res = await resp.json();
         if (res.success) {
             alert(`✅ テスト通知が正常に送信されました (HTTP ${res.status_code})`);
@@ -655,7 +709,7 @@ async function testWebhook(webhookId) {
 async function deleteWebhook(webhookId) {
     if (!confirm("このWebHookを削除しますか？")) return;
     try {
-        await fetch(`/api/webhooks/${webhookId}`, { method: "DELETE" });
+        await fetch(`/api/webhooks/${encodeURIComponent(webhookId)}`, { method: "DELETE" });
         fetchWebhooks();
     } catch (e) {
         console.error("Failed to delete webhook:", e);
@@ -673,14 +727,14 @@ async function fetchRAGDocs() {
             <div class="bg-slate-950/70 border border-slate-800 rounded-xl p-4 text-xs space-y-2">
                 <div class="flex items-center justify-between">
                     <div class="flex items-center gap-2">
-                        <span class="px-2 py-0.5 text-[10px] font-bold rounded bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 uppercase">${doc.category}</span>
-                        <strong class="text-sm text-slate-200">${doc.title}</strong>
+                        <span class="px-2 py-0.5 text-[10px] font-bold rounded bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 uppercase">${escapeHtml(doc.category)}</span>
+                        <strong class="text-sm text-slate-200">${escapeHtml(doc.title)}</strong>
                     </div>
-                    <span class="px-2 py-0.5 text-[10px] font-bold rounded bg-slate-800 text-slate-400">${doc.priority}</span>
+                    <span class="px-2 py-0.5 text-[10px] font-bold rounded bg-slate-800 text-slate-400">${escapeHtml(doc.priority)}</span>
                 </div>
-                <p class="text-slate-400">${doc.summary}</p>
+                <p class="text-slate-400">${escapeHtml(doc.summary)}</p>
                 <div class="bg-slate-900 rounded p-2.5 space-y-1 font-mono text-[11px] text-slate-300">
-                    ${doc.procedure_steps.map(s => `<div>${s}</div>`).join("")}
+                    ${doc.procedure_steps.map(s => `<div>${escapeHtml(s)}</div>`).join("")}
                 </div>
             </div>
         `).join("");
@@ -816,7 +870,7 @@ function updateVisualRAGCard(visualRag) {
     if (top) {
         if (titleEl) titleEl.innerText = top.title || "リファレンス照合中";
         if (thumbImg && top.image_base64) {
-            thumbImg.src = top.image_base64;
+            thumbImg.src = safeImageSrc(top.image_base64);
             thumbImg.classList.remove("hidden");
             if (noThumb) noThumb.classList.add("hidden");
         }
@@ -866,16 +920,16 @@ function renderVisualRAGGallery(refs) {
     listEl.innerHTML = refs.map(r => `
         <div class="bg-slate-950 border ${r.is_anomaly ? 'border-rose-900/60' : 'border-emerald-900/60'} rounded-xl p-2.5 space-y-1.5 relative group">
             <div class="aspect-video bg-black rounded-lg overflow-hidden flex items-center justify-center">
-                ${r.image_base64 ? `<img src="${r.image_base64}" class="w-full h-full object-cover">` : '<span class="text-[9px] text-slate-600">NO IMAGE</span>'}
+                ${safeImageSrc(r.image_base64) ? `<img src="${escapeHtml(safeImageSrc(r.image_base64))}" class="w-full h-full object-cover">` : '<span class="text-[9px] text-slate-600">NO IMAGE</span>'}
             </div>
             <div class="flex items-center justify-between text-[11px]">
-                <span class="font-bold text-slate-200 truncate" title="${r.title}">${r.title}</span>
+                <span class="font-bold text-slate-200 truncate" title="${escapeHtml(r.title)}">${escapeHtml(r.title)}</span>
                 <span class="px-1.5 py-0.2 text-[9px] rounded ${r.is_anomaly ? 'bg-rose-500/20 text-rose-300 border border-rose-800' : 'bg-emerald-500/20 text-emerald-300 border border-emerald-800'}">
                     ${r.is_anomaly ? '異常事例' : '正常'}
                 </span>
             </div>
-            <div class="text-[10px] text-slate-400 truncate">${r.category}</div>
-            <button onclick="deleteVisualReference('${r.ref_id}')" class="absolute top-1.5 right-1.5 bg-black/70 hover:bg-red-600 text-slate-300 hover:text-white rounded-full w-5 h-5 flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition">
+            <div class="text-[10px] text-slate-400 truncate">${escapeHtml(r.category)}</div>
+            <button data-action="delete-visual-reference" data-id="${escapeHtml(r.ref_id)}" class="absolute top-1.5 right-1.5 bg-black/70 hover:bg-red-600 text-slate-300 hover:text-white rounded-full w-5 h-5 flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition">
                 &times;
             </button>
         </div>
@@ -885,7 +939,7 @@ function renderVisualRAGGallery(refs) {
 async function deleteVisualReference(refId) {
     if (!confirm(`リファレンス画像 '${refId}' を削除しますか？`)) return;
     try {
-        await fetch(`/api/visual_rag/references/${refId}`, { method: "DELETE" });
+        await fetch(`/api/visual_rag/references/${encodeURIComponent(refId)}`, { method: "DELETE" });
         fetchVisualRAGReferences();
     } catch (e) {
         console.error("Failed to delete reference:", e);

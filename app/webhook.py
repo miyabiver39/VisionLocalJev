@@ -3,10 +3,15 @@ import json
 import logging
 import threading
 import requests
+from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, Any, List, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
+
+from app.security import validate_http_url
 
 logger = logging.getLogger("vision_jev.webhook")
+
+MAX_HISTORY = 100
 
 
 class WebhookConfig(BaseModel):
@@ -18,6 +23,18 @@ class WebhookConfig(BaseModel):
     min_score: float = 0.75
     cooldown_seconds: float = 30.0
 
+    @field_validator("url")
+    @classmethod
+    def _check_url(cls, v: str) -> str:
+        return validate_http_url(v)
+
+    @field_validator("format")
+    @classmethod
+    def _check_format(cls, v: str) -> str:
+        if v not in ("slack", "discord", "generic_json"):
+            raise ValueError("format must be one of: slack, discord, generic_json")
+        return v
+
 
 class WebhookDispatcher:
     """Manages and dispatches real-time incident alert webhooks to Slack, Discord, or Custom endpoints."""
@@ -26,7 +43,9 @@ class WebhookDispatcher:
         self.webhooks: Dict[str, WebhookConfig] = {}
         self.lock = threading.Lock()
         self.last_dispatched: Dict[str, float] = {}  # key -> timestamp
-        self.history: List[Dict[str, Any]] = []  # max 50 items
+        self.history: List[Dict[str, Any]] = []  # max MAX_HISTORY items
+        # Bounded worker pool: slow/unreachable endpoints can no longer spawn unbounded threads
+        self.executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="webhook")
 
     def add_or_update(self, config: WebhookConfig):
         with self.lock:
@@ -37,6 +56,9 @@ class WebhookDispatcher:
         with self.lock:
             if webhook_id in self.webhooks:
                 del self.webhooks[webhook_id]
+                prefix = f"{webhook_id}:"
+                for key in [k for k in self.last_dispatched if k.startswith(prefix)]:
+                    del self.last_dispatched[key]
                 return True
             return False
 
@@ -46,42 +68,40 @@ class WebhookDispatcher:
 
     def get_history(self) -> List[Dict[str, Any]]:
         with self.lock:
-            return list(reversed(self.history[-50:]))
+            return list(reversed(self.history))
 
     def dispatch_alert_async(self, alert_event: Dict[str, Any]):
-        """Dispatches alert in a background thread to prevent blocking inference."""
-        threading.Thread(target=self._dispatch_worker, args=(alert_event,), daemon=True).start()
+        """Selects due webhooks (atomically w.r.t. cooldown) and sends them on the worker pool."""
+        for hook in self._select_due_hooks(alert_event):
+            self.executor.submit(self._send_payload, hook, alert_event)
 
-    def _dispatch_worker(self, event: Dict[str, Any]):
-        """Evaluates active webhooks and sends HTTP POST payloads."""
+    def _select_due_hooks(self, event: Dict[str, Any]) -> List[WebhookConfig]:
+        """Returns enabled hooks whose score filter and per-(hook, camera) cooldown allow sending.
+
+        The cooldown check-and-set happens under the lock so concurrent alerts
+        cannot both pass the cooldown and send duplicates.
+        """
         camera_id = event.get("camera_id", "default")
         score = event.get("score", 0.0)
         now = time.time()
+        due: List[WebhookConfig] = []
 
         with self.lock:
-            active_hooks = list(self.webhooks.values())
-
-        for hook in active_hooks:
-            if not hook.enabled:
-                continue
-
-            if score < hook.min_score:
-                continue
-
-            # Check cooldown per (webhook_id, camera_id)
-            cooldown_key = f"{hook.id}:{camera_id}"
-            last_time = self.last_dispatched.get(cooldown_key, 0.0)
-            if now - last_time < hook.cooldown_seconds:
-                logger.debug(f"Suppressing webhook '{hook.name}' due to cooldown.")
-                continue
-
-            # Send payload
-            self.last_dispatched[cooldown_key] = now
-            self._send_payload(hook, event)
+            for hook in self.webhooks.values():
+                if not hook.enabled or score < hook.min_score:
+                    continue
+                cooldown_key = f"{hook.id}:{camera_id}"
+                if now - self.last_dispatched.get(cooldown_key, 0.0) < hook.cooldown_seconds:
+                    logger.debug(f"Suppressing webhook '{hook.name}' due to cooldown.")
+                    continue
+                self.last_dispatched[cooldown_key] = now
+                due.append(hook)
+        return due
 
     def send_test_ping(self, webhook_id: str) -> Dict[str, Any]:
         """Sends an immediate test alert to verify endpoint connectivity."""
-        hook = self.webhooks.get(webhook_id)
+        with self.lock:
+            hook = self.webhooks.get(webhook_id)
         if not hook:
             return {"success": False, "error": f"Webhook '{webhook_id}' not found"}
 
@@ -199,8 +219,8 @@ class WebhookDispatcher:
 
         with self.lock:
             self.history.append(status_entry)
-            if len(self.history) > 100:
-                self.history = self.history[-100:]
+            if len(self.history) > MAX_HISTORY:
+                self.history = self.history[-MAX_HISTORY:]
 
         return status_entry
 

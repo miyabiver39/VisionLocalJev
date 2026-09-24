@@ -90,8 +90,7 @@ class CameraDevice:
         self.source_type = source_type.lower()  # rtsp, youtube, jpeg_url, webcam, synthetic
         self.source_url = source_url
         self.preset_id = preset_id
-        self.sample_fps = max(0.2, min(sample_fps, 10.0))
-        self.sample_interval = 1.0 / self.sample_fps
+        self.set_sample_fps(sample_fps)
         self.motion_threshold = motion_threshold
 
         # Auto-detect source types
@@ -119,6 +118,11 @@ class CameraDevice:
         self.last_fps_calc_time = time.time()
         self.status = "INITIALIZING"
         self.error_message = ""
+
+    def set_sample_fps(self, sample_fps: float):
+        """Sets the inference sampling rate, clamped to the supported 0.2 - 10.0 FPS range."""
+        self.sample_fps = max(0.2, min(float(sample_fps), 10.0))
+        self.sample_interval = 1.0 / self.sample_fps
 
     def start(self):
         """Starts the ingestion thread."""
