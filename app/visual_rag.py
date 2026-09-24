@@ -353,7 +353,7 @@ class VisualRAGEngine:
                 "title": "外周フェンス乗り越え侵入 (侵入警報事例)",
                 "category": "security",
                 "is_anomaly": True,
-                "sop_id": "sop_outer_fence_breach",
+                "sop_id": "sop_trespass_breach",
                 "bg_color": (25, 25, 30),
                 "decorations": [
                     ("line", (0, 200, 512, 200), (150, 150, 150)),  # フェンス
