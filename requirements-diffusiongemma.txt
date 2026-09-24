@@ -1,0 +1,11 @@
+# DiffusionGemma 画像入力検証 (scripts/diffusiongemma_vision_check.py) 用
+# PyTorch は GPU に合わせて別途インストールしてください:
+#   NVIDIA (CUDA): pip install torch --index-url https://download.pytorch.org/whl/cu128
+#   AMD (ROCm, Linux): pip install torch --index-url https://download.pytorch.org/whl/rocm7.2
+#   CPU のみ:        pip install torch --index-url https://download.pytorch.org/whl/cpu
+transformers>=5.10
+accelerate>=1.10
+pillow>=10.2.0
+PyYAML>=6.0.1
+# FP8 / INT4 (compressed-tensors) モデル [2][3][4] を使う場合に必要
+compressed-tensors>=0.12
