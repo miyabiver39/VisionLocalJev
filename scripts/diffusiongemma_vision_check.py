@@ -35,7 +35,8 @@ MODEL_ID = "trl-internal-testing/tiny-DiffusionGemmaForBlockDiffusion"
 # MODEL_ID = "RedHatAI/diffusiongemma-26B-A4B-it-FP8-dynamic"
 
 # [3] INT4 AWQ (重み 17.2GB) — L4 24GB / A100 40GB / RTX 4090 など。要 compressed-tensors。
-#     16GB GPU (RX 9060 XT / Colab T4) では GPU に載り切らないため --gpu-mem-gb で CPU オフロードが必要 (低速)。
+#     16GB GPU (RX 9060 XT / Colab T4) では --lowvram --cpu-expert-layers 14 を付ける
+#     (エキスパートを INT4 のまま保持する独自ローダ。RX 9060 XT で動作確認済み: docs/local_rocm_wsl.md)
 # MODEL_ID = "cyankiwi/diffusiongemma-26B-A4B-it-AWQ-INT4"
 
 # [4] NVFP4 (重み 18.1GB) — NVIDIA Blackwell 世代 (B200 / RTX 50 系) 専用。
@@ -143,6 +144,10 @@ def main():
     ap.add_argument("--gpu-mem-gb", type=float, default=None,
                     help="GPU に載せる上限 (GB)。超えた分は CPU メモリへオフロード (VRAM 不足時)")
     ap.add_argument("--cpu", action="store_true", help="GPU があっても CPU で実行")
+    ap.add_argument("--lowvram", action="store_true",
+                    help="[3] INT4 AWQ 専用: エキスパートを INT4 のまま保持する独自ローダで 16GB GPU に載せる")
+    ap.add_argument("--cpu-expert-layers", type=int, default=10,
+                    help="--lowvram 時に CPU に置いて都度転送するエキスパート層の数 (VRAM 不足なら増やす)")
     args = ap.parse_args()
 
     import torch
@@ -167,7 +172,14 @@ def main():
 
     t0 = time.perf_counter()
     processor = AutoProcessor.from_pretrained(args.model)
-    model = DiffusionGemmaForBlockDiffusion.from_pretrained(args.model, **load_kwargs)
+    if args.lowvram:
+        if not use_gpu:
+            raise SystemExit("--lowvram は GPU が必要です")
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from diffusiongemma_lowvram import load_int4_lowvram
+        model = load_int4_lowvram(args.model, cpu_expert_layers=args.cpu_expert_layers)
+    else:
+        model = DiffusionGemmaForBlockDiffusion.from_pretrained(args.model, **load_kwargs)
     if not use_gpu:
         model = model.to("cpu")
     model.eval()
