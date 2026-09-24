@@ -54,3 +54,6 @@ app/data/
 
 # Test caches
 .pytest_cache/
+
+# DiffusionGemma verification venv
+.venv-dg/
