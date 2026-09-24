@@ -135,9 +135,43 @@ function handleIncomingMessage(data) {
     }
 
     if (data.type === "decision_update") {
+        hideDecisionError();
         renderDecisionTelemetry(data);
         if (data.metrics) updateMetricsHUD(data.metrics);
+        return;
     }
+
+    if (data.type === "decision_error") {
+        showDecisionError(data.error, data.camera_name || data.camera_id, data.time_str);
+    }
+}
+
+// 判定エンジン (推論サーバー) の失敗表示。CPU エミュレータへの自動切り替えはしない
+function showDecisionError(error, cameraName, timeStr) {
+    const container = document.getElementById("decision-cards-container");
+    if (!container) return;
+    let banner = document.getElementById("decision-error-banner");
+    if (!banner) {
+        banner = document.createElement("div");
+        banner.id = "decision-error-banner";
+        banner.className = "bg-red-950/70 border border-red-800/60 rounded-xl p-3 text-xs text-red-200 space-y-1";
+        container.parentNode.insertBefore(banner, container);
+    }
+    const status = error && error.status ? ` (HTTP ${escapeHtml(error.status)})` : "";
+    banner.innerHTML = `
+        <div class="font-bold text-red-300">判定エンジンエラー${status}: ${escapeHtml(error ? error.kind : "unknown")}</div>
+        <div class="font-mono break-all">${escapeHtml(error ? error.message : "")}</div>
+        <div class="text-red-400/80">${escapeHtml(cameraName || "")} ${escapeHtml(timeStr || "")} — 判定結果は更新されていません</div>
+    `;
+    banner.classList.remove("hidden");
+    container.classList.add("opacity-40");
+}
+
+function hideDecisionError() {
+    const banner = document.getElementById("decision-error-banner");
+    if (banner) banner.classList.add("hidden");
+    const container = document.getElementById("decision-cards-container");
+    if (container) container.classList.remove("opacity-40");
 }
 
 function updateMetricsHUD(metrics) {
@@ -204,10 +238,13 @@ function renderDecisionTelemetry(data) {
         const multiEl = document.getElementById("djev-multimodal-val");
         const modelTag = document.getElementById("djev-model-tag");
 
-        if (stepsEl) stepsEl.innerText = `${djev.diffusion_steps || 8} Steps`;
-        if (entropyEl) entropyEl.innerText = djev.canvas_entropy !== undefined ? djev.canvas_entropy.toFixed(3) : "0.042";
+        if (stepsEl) stepsEl.innerText = (djev.mode || "-").toUpperCase();
+        if (entropyEl) {
+            const usage = data.decision.usage || {};
+            entropyEl.innerText = usage.input_tokens ? `${usage.input_tokens} tok` : "-";
+        }
         if (multiEl) multiEl.innerText = djev.is_multimodal ? "MULTIMODAL" : "TEXT-ONLY";
-        if (modelTag) modelTag.innerText = djev.model ? djev.model.replace("google/", "") : "DJev-26B-MoE";
+        if (modelTag) modelTag.innerText = djev.model || "-";
     }
 
     // 2.7 Visual RAG Reference Card
@@ -216,8 +253,8 @@ function renderDecisionTelemetry(data) {
     }
 
     // 3. Jev Decision Cards
-    if (data.decision && data.decision.decisions) {
-        renderDecisionCards(data.decision.decisions);
+    if (data.decision && data.decision.answers) {
+        renderDecisionCards(data.decision.answers, data.decision.labels || {});
     }
 
     // 4. RAG SOP Action Card
@@ -250,29 +287,31 @@ function renderDecisionTelemetry(data) {
 
 // ===================== Decision Cards & SOP Renderers =====================
 
-function renderDecisionCards(decisions) {
+// answers は TypeSafe System One の Answer 形式 (choice / score / noul)
+function renderDecisionCards(answers, labels) {
     const container = document.getElementById("decision-cards-container");
     if (!container) return;
 
     let html = "";
-    for (const [qid, q] of Object.entries(decisions)) {
-        if (q.type === "choice") {
-            html += renderChoiceCard(q);
-        } else if (q.type === "score") {
-            html += renderScoreCard(q);
-        } else if (q.type === "noul") {
-            html += renderNoulCard(q);
+    for (const [qid, a] of Object.entries(answers)) {
+        const label = labels[qid] || qid;
+        if (a.type === "choice") {
+            html += renderChoiceCard(a, label);
+        } else if (a.type === "score") {
+            html += renderScoreCard(a, label);
+        } else if (a.type === "noul") {
+            html += renderNoulCard(a, label);
         }
     }
     container.innerHTML = html;
 }
 
-function renderChoiceCard(q) {
+function renderChoiceCard(q, label) {
     let choicesHtml = "";
     const sorted = Object.entries(q.probabilities || {}).sort((a, b) => b[1] - a[1]);
 
     for (const [choice, prob] of sorted) {
-        const isSelected = choice === q.selected;
+        const isSelected = choice === q.choice;
         const pct = Math.round(prob * 100);
         const barColor = isSelected ? (pct > 70 ? "bg-indigo-500" : "bg-blue-500") : "bg-slate-700";
         const textColor = isSelected ? "text-indigo-300 font-semibold" : "text-slate-400";
@@ -298,7 +337,7 @@ function renderChoiceCard(q) {
             <div class="flex items-center justify-between mb-2.5">
                 <div class="flex items-center gap-2">
                     <span class="px-2 py-0.5 text-[10px] font-bold rounded bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 uppercase">CHOICE</span>
-                    <h3 class="text-xs font-semibold text-slate-200">${escapeHtml(q.label)}</h3>
+                    <h3 class="text-xs font-semibold text-slate-200">${escapeHtml(label)}</h3>
                 </div>
                 <span class="text-xs text-slate-400 font-mono">Conf: ${(q.confidence * 100).toFixed(1)}%</span>
             </div>
@@ -309,9 +348,13 @@ function renderChoiceCard(q) {
     `;
 }
 
-function renderScoreCard(q) {
-    const scoreVal = q.score || 0;
+function renderScoreCard(q, label) {
+    // TypeSafe の score は段階番号の期待値 (0 〜 段階数-1)。色分けとバーは 0〜1 に正規化して表示
+    const levels = Object.keys(q.legend || {}).length || 2;
+    const scoreVal = (q.score || 0) / Math.max(1, levels - 1);
     const pct = Math.round(scoreVal * 100);
+    const modal = Object.entries(q.probabilities || {}).sort((a, b) => b[1] - a[1])[0];
+    const modalText = modal ? (q.legend || {})[modal[0]] : "";
     let colorClass = "text-emerald-400";
     let barColor = "bg-emerald-500";
 
@@ -328,36 +371,36 @@ function renderScoreCard(q) {
             <div class="flex items-center justify-between mb-2">
                 <div class="flex items-center gap-2">
                     <span class="px-2 py-0.5 text-[10px] font-bold rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 uppercase">SCORE</span>
-                    <h3 class="text-xs font-semibold text-slate-200">${escapeHtml(q.label)}</h3>
+                    <h3 class="text-xs font-semibold text-slate-200">${escapeHtml(label)}</h3>
                 </div>
                 <span class="text-xs text-slate-400 font-mono">Conf: ${(q.confidence * 100).toFixed(1)}%</span>
             </div>
             <div class="flex items-end justify-between mb-1.5">
-                <span class="text-2xl font-mono ${colorClass}">${scoreVal.toFixed(2)}</span>
-                <span class="text-[11px] text-slate-400">Scale: 0.0 - 1.0</span>
+                <span class="text-2xl font-mono ${colorClass}">${(q.score || 0).toFixed(2)}</span>
+                <span class="text-[11px] text-slate-400">Scale: 0 - ${levels - 1}</span>
             </div>
             <div class="w-full bg-slate-800 rounded-full h-2 overflow-hidden mb-1.5">
                 <div class="${barColor} h-2 rounded-full transition-all duration-300" style="width: ${pct}%"></div>
             </div>
-            ${q.rubric ? `<p class="text-[10px] text-slate-400 italic">${escapeHtml(q.rubric)}</p>` : ''}
+            ${modalText ? `<p class="text-[10px] text-slate-400 italic">${escapeHtml(modalText)}</p>` : ''}
         </div>
     `;
 }
 
-function renderNoulCard(q) {
-    const isTrue = q.value === true;
+function renderNoulCard(q, label) {
+    const isTrue = (q.noul || 0) >= 0.5;
     const badgeColor = isTrue
         ? "bg-red-500/20 text-red-400 border-red-500/40"
         : "bg-emerald-500/20 text-emerald-400 border-emerald-500/40";
     const statusText = isTrue ? "TRIGGERED (YES)" : "SAFE (NO)";
-    const truePct = Math.round((q.true_prob || 0) * 100);
+    const truePct = Math.round((q.noul || 0) * 100);
 
     return `
         <div class="bg-slate-900 border border-slate-800 rounded-xl p-3.5 shadow-sm">
             <div class="flex items-center justify-between mb-2">
                 <div class="flex items-center gap-2">
                     <span class="px-2 py-0.5 text-[10px] font-bold rounded bg-purple-500/20 text-purple-400 border border-purple-500/30 uppercase">NOUL</span>
-                    <h3 class="text-xs font-semibold text-slate-200">${escapeHtml(q.label)}</h3>
+                    <h3 class="text-xs font-semibold text-slate-200">${escapeHtml(label)}</h3>
                 </div>
                 <span class="px-2 py-0.5 text-xs font-semibold rounded border ${badgeColor}">
                     ${statusText}
@@ -365,14 +408,13 @@ function renderNoulCard(q) {
             </div>
             <div class="space-y-1 mb-1.5">
                 <div class="flex justify-between text-xs text-slate-400">
-                    <span>Hypothesis Truth Probability</span>
+                    <span>P(yes)</span>
                     <span class="font-mono text-slate-200 font-semibold">${truePct}%</span>
                 </div>
                 <div class="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
                     <div class="${isTrue ? 'bg-red-500' : 'bg-emerald-500'} h-1.5 rounded-full transition-all duration-300" style="width: ${truePct}%"></div>
                 </div>
             </div>
-            ${q.hypothesis ? `<p class="text-[10px] text-slate-400 italic">"${escapeHtml(q.hypothesis)}"</p>` : ''}
         </div>
     `;
 }
@@ -770,6 +812,12 @@ function initQuickTestButtons() {
                     })
                 });
                 const res = await resp.json();
+                if (!resp.ok) {
+                    const err = (res.detail && res.detail.decision_engine_error) || { kind: "http", status: resp.status, message: JSON.stringify(res.detail) };
+                    showDecisionError(err, "Manual Injection", new Date().toLocaleTimeString());
+                    return;
+                }
+                hideDecisionError();
                 console.log("Triggered test scenario result (freeze for 20s):", res);
                 renderDecisionTelemetry({
                     type: "decision_update",
@@ -785,7 +833,9 @@ function initQuickTestButtons() {
                     decision: {
                         latency_ms: res.latency_ms,
                         mode: res.mode,
-                        decisions: res.decisions,
+                        answers: res.answers,
+                        labels: res.labels,
+                        usage: res.usage,
                         score: res.score,
                         is_alert: res.is_alert,
                         alert_reason: res.alert_reason,

@@ -1,20 +1,29 @@
 id: "river_flood"
 name: "河川監視・水害警戒"
 description: "平常水位、氾濫注意水位到達、越水・堤防洗掘、中州取り残されの検知"
+# questions は TypeSafe System One の Question 形式 (type / instructions / criteria)。
+# label は画面表示用で、推論サーバーには送らない。
 questions:
   - id: "flood_stage"
     type: "choice"
     label: "河川警戒ステージ"
-    choices:
-      - "normal_flow"        # 平常水位・平穏
-      - "advisory_level"     # 注意水位超過・激流
-      - "overflow_breach"    # 越水・堤防氾濫
-      - "stranded_person"    # 中州・河川敷取り残され
+    instructions: "What is the state of the river in this monitoring camera?"
+    criteria:
+      normal_flow: "Normal water level, calm flow"                                  # 平常水位・平穏
+      advisory_level: "High water or a fast muddy current, still within banks"      # 注意水位超過・激流
+      overflow_breach: "Water overflowing or breaching the embankment"              # 越水・堤防氾濫
+      stranded_person: "A person stranded on a sandbar or riverbank"                # 中州・河川敷取り残され
   - id: "flood_risk_score"
     type: "score"
     label: "水害切迫度スコア"
-    rubric: "Rate inundation disaster hazard from 0.0 (normal clear flow) to 1.0 (imminent dyke breach or catastrophic flood)."
+    instructions: "How severe is the flood hazard?"
+    criteria:
+      - "None: normal clear flow"
+      - "Low: slightly raised water"
+      - "Moderate: high water, advisory level"
+      - "High: near the top of the embankment"
+      - "Critical: overflow, breach or people in danger"
   - id: "evacuation_order"
     type: "noul"
     label: "避難指示・水防団招集"
-    hypothesis: "River water has breached embankments or civilians are stranded requiring immediate rescue."
+    instructions: "Has river water breached the embankments, or are people stranded and in need of immediate rescue?"

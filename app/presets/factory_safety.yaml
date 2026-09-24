@@ -1,20 +1,29 @@
 id: "factory_safety"
 name: "工場・労働安全監視"
 description: "保護具（ヘルメット）未着用、重機旋回域危険進入、作業員倒臥の検知"
+# questions は TypeSafe System One の Question 形式 (type / instructions / criteria)。
+# label は画面表示用で、推論サーバーには送らない。
 questions:
   - id: "safety_incident"
     type: "choice"
     label: "安全状態・労災種別"
-    choices:
-      - "safe_operation"     # 安全作業・正常動線
-      - "ppe_missing"        # 保護具・ヘルメット未着用
-      - "danger_zone_entry"  # 重機稼働域・立入禁止進入
-      - "worker_down"        # 作業員倒臥・意識不明
+    instructions: "What is the safety situation of the workers in this factory camera?"
+    criteria:
+      safe_operation: "Workers operating safely with protective equipment"          # 安全作業・正常動線
+      ppe_missing: "A worker without a helmet, vest or other protective equipment"  # 保護具・ヘルメット未着用
+      danger_zone_entry: "A worker inside a heavy-machinery or restricted zone"     # 重機稼働域・立入禁止進入
+      worker_down: "A worker collapsed, lying down or trapped"                      # 作業員倒臥・意識不明
   - id: "incident_hazard"
     type: "score"
     label: "労災リスクスコア"
-    rubric: "Rate industrial hazard level from 0.0 (full compliant safety) to 1.0 (worker trapped or collapsed)."
+    instructions: "How severe is the industrial accident risk?"
+    criteria:
+      - "None: fully compliant safe operation"
+      - "Low: minor rule deviation"
+      - "Moderate: missing protective equipment"
+      - "High: person inside a danger zone"
+      - "Critical: worker collapsed or trapped"
   - id: "emergency_stop"
     type: "noul"
     label: "設備停止・救護要請"
-    hypothesis: "Critical industrial accident or severe intrusion requiring immediate machine cutoff."
+    instructions: "Is there a critical accident or intrusion that requires an immediate machine emergency stop?"

@@ -2,43 +2,69 @@ import time
 import os
 import yaml
 import logging
-import base64
-import requests
 import cv2
 import numpy as np
 from typing import Dict, Any, List, Optional
+
+from app.typesafe import (
+    DecisionEngineError,
+    TypeSafeClient,
+    choice_answer,
+    noul_answer,
+    normalized_value,
+    preset_to_questions,
+    score_answer_from_unit,
+    validate_questions,
+)
 
 logger = logging.getLogger("vision_jev.djev")
 
 
 class DiffusionGemmaJevEngine:
     """
-    DiffusionGemma-Jev (DJev) Engine.
-    Non-autoregressive discrete diffusion decision core with native multimodal (image + typed questions) input.
-    Compatible with Davipar/djev-dev and Google DiffusionGemma.
+    型付き判定エンジン。入出力は TypeSafe System One API の形式 (questions / answers) に揃えている。
+
+    - mode="remote"  : TypeSafe 互換サーバー (TypeSafe 本家 Jev / imajev / Qev / Kev 等) に POST /v1/systemone。
+                       失敗時は CPU エミュレータに切り替えず DecisionEngineError を送出する。
+    - mode="embedded": GPU なしで UI・通知まわりを動かすための CPU エミュレータ
+                       (OpenCV 特徴量 + キーワード規則)。モデル推論は行わない。
     """
 
     def __init__(
         self,
         mode: str = "embedded",
-        remote_url: str = "http://localhost:8080/v1/djev/decide",
+        remote_url: str = "http://localhost:8765/v1/systemone",
         presets_dir: str = "app/presets",
         alert_threshold: float = 0.80,
-        diffusion_steps: int = 8
+        diffusion_steps: int = 8,
+        remote_model: str = "jev-latest",
+        api_key: str = "",
+        image_mode: str = "images",
+        timeout: float = 10.0,
     ):
         self.mode = mode.lower()
+        if self.mode not in ("embedded", "remote"):
+            raise DecisionEngineError("config", f"DJEV_MODE must be 'embedded' or 'remote', got {mode!r}")
         self.remote_url = remote_url
         self.presets_dir = presets_dir
         self.alert_threshold = alert_threshold
         self.diffusion_steps = max(2, min(diffusion_steps, 32))
-        self.model_name = "google/diffusion-gemma-26b-djev"
+        self.client: Optional[TypeSafeClient] = None
+        if self.mode == "remote":
+            self.client = TypeSafeClient(remote_url, model=remote_model, api_key=api_key,
+                                         image_mode=image_mode, timeout=timeout)
+            self.model_name = remote_model
+        else:
+            self.model_name = "embedded-cpu-emulator"
         self.presets: Dict[str, Dict[str, Any]] = {}
+        self.questions: Dict[str, Dict[str, Dict[str, Any]]] = {}  # preset_id -> TypeSafe questions
 
         self._load_presets()
-        logger.info(f"DiffusionGemma-Jev (DJev) Engine initialized in '{self.mode}' mode with {self.diffusion_steps} diffusion steps.")
+        target = self.client.url if self.client else "CPU emulator (no model inference)"
+        logger.info(f"Decision engine initialized in '{self.mode}' mode -> {target}")
 
     def _load_presets(self):
-        """Loads all YAML preset definitions."""
+        """Loads all YAML preset definitions and converts their questions to TypeSafe format."""
         if not os.path.isdir(self.presets_dir):
             logger.warning(f"Presets directory not found: {self.presets_dir}")
             return
@@ -49,9 +75,12 @@ class DiffusionGemmaJevEngine:
                 try:
                     with open(filepath, "r", encoding="utf-8") as f:
                         data = yaml.safe_load(f)
-                        if data and "id" in data:
-                            self.presets[data["id"]] = data
-                            logger.info(f"Loaded preset: {data['id']} ({data.get('name')})")
+                    if data and "id" in data:
+                        questions = preset_to_questions(data)
+                        validate_questions(questions)
+                        self.presets[data["id"]] = data
+                        self.questions[data["id"]] = questions
+                        logger.info(f"Loaded preset: {data['id']} ({data.get('name')})")
                 except Exception as e:
                     logger.error(f"Error loading preset {filepath}: {e}")
 
@@ -66,6 +95,11 @@ class DiffusionGemmaJevEngine:
             for p in self.presets.values()
         ]
 
+    def question_labels(self, preset_id: str) -> Dict[str, str]:
+        """画面表示用ラベル (TypeSafe の questions には含めない)。"""
+        preset = self.presets.get(preset_id, {})
+        return {q["id"]: q.get("label", q["id"]) for q in preset.get("questions", [])}
+
     def evaluate_multimodal(
         self,
         frame: Optional[np.ndarray],
@@ -75,57 +109,53 @@ class DiffusionGemmaJevEngine:
         context_text: Optional[str] = None
     ) -> Dict[str, Any]:
         """
-        Evaluates questions directly against the visual image tensor and optional context text
-        using non-autoregressive discrete diffusion generation.
+        Evaluates the preset's TypeSafe questions against the frame and optional state text.
+
+        Returns the TypeSafe response (model / answers / usage) plus app metadata.
+        Raises DecisionEngineError in remote mode when the server fails (no silent fallback).
         """
         preset = self.presets.get(preset_id)
         if not preset:
             return {"error": f"Preset '{preset_id}' not found"}
+        questions = self.questions[preset_id]
 
         start_time = time.time()
-        results: Dict[str, Any] = {}
-        diffusion_meta: Dict[str, Any] = {}
-
         if self.mode == "remote":
-            try:
-                results, diffusion_meta = self._evaluate_remote(frame, preset, context_text)
-            except Exception as e:
-                logger.warning(f"Remote DJev query failed ({e}). Falling back to embedded DJev core.")
-                results, diffusion_meta = self._evaluate_embedded_diffusion(frame, preset, context_text)
+            state = context_text or "Security camera frame."
+            image_jpeg = None
+            if frame is not None:
+                ok, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+                if ok:
+                    image_jpeg = buf.tobytes()
+            response = self.client.evaluate(state, questions, image_jpeg)
         else:
-            results, diffusion_meta = self._evaluate_embedded_diffusion(frame, preset, context_text)
-
+            response = self._evaluate_embedded(frame, preset, questions, context_text)
         latency_ms = (time.time() - start_time) * 1000.0
 
-        is_alert, alert_reason = self._check_alert_status(results)
-
-        top_score = 0.0
-        for qid, qdata in results.items():
-            if qdata.get("type") == "score":
-                top_score = max(top_score, qdata.get("score", 0.0))
-            elif qdata.get("type") == "noul" and qdata.get("value") is True:
-                top_score = max(top_score, qdata.get("confidence", 0.0))
+        answers = response["answers"]
+        is_alert, alert_reason = self._check_alert_status(answers, preset_id)
+        top_score = max((normalized_value(a) for a in answers.values() if a["type"] in ("score", "noul")), default=0.0)
 
         return {
             "camera_id": camera_id,
             "camera_name": camera_name,
             "preset_id": preset_id,
             "preset_name": preset.get("name", preset_id),
-            "state": context_text or diffusion_meta.get("synthesized_state", "Multimodal visual canvas analyzed."),
+            "state": context_text or "",
+            "model": response.get("model", self.model_name),
+            "answers": answers,
+            "usage": response.get("usage", {"input_tokens": 0, "output_tokens": 0}),
+            "labels": self.question_labels(preset_id),
             "score": round(top_score, 3),
-            "decisions": results,
             "is_alert": is_alert,
             "alert_reason": alert_reason,
             "alert_threshold": self.alert_threshold,
             "latency_ms": round(latency_ms, 2),
-            "engine": "diffusion-gemma-jev",
+            "engine": "typesafe-systemone",
             "djev": {
                 "mode": self.mode,
-                "model": self.model_name,
-                "diffusion_steps": self.diffusion_steps,
-                "canvas_entropy": diffusion_meta.get("canvas_entropy", 0.04),
-                "denoise_confidence": diffusion_meta.get("denoise_confidence", 0.98),
-                "is_multimodal": (frame is not None)
+                "model": response.get("model", self.model_name),
+                "is_multimodal": (frame is not None),
             },
             "timestamp": time.time()
         }
@@ -140,99 +170,31 @@ class DiffusionGemmaJevEngine:
             context_text=state
         )
 
-    def _evaluate_remote(
+    def _evaluate_embedded(
         self,
         frame: Optional[np.ndarray],
         preset: Dict[str, Any],
+        questions: Dict[str, Dict[str, Any]],
         context_text: Optional[str]
-    ) -> tuple[Dict[str, Any], Dict[str, Any]]:
-        """Queries external Davipar/djev-dev or vLLM DiffusionGemma REST endpoint."""
-        payload: Dict[str, Any] = {
-            "questions": preset.get("questions", []),
-            "context": context_text or "",
-            "diffusion_steps": self.diffusion_steps
-        }
-
-        if frame is not None:
-            _, buffer = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
-            b64_img = base64.b64encode(buffer).decode("utf-8")
-            payload["image_base64"] = b64_img
-
-        resp = requests.post(self.remote_url, json=payload, timeout=3.5)
-        resp.raise_for_status()
-        data = resp.json()
-        return data.get("decisions", {}), data.get("diffusion_meta", {})
-
-    def _evaluate_embedded_diffusion(
-        self,
-        frame: Optional[np.ndarray],
-        preset: Dict[str, Any],
-        context_text: Optional[str]
-    ) -> tuple[Dict[str, Any], Dict[str, Any]]:
-        """
-        Embedded DiffusionGemma-Jev (DJev) non-autoregressive discrete diffusion core.
-        Executes t=T -> t=0 denoising across the joint multimodal canvas.
-        """
-        # 1. Extract Multimodal Visual Feature Embeddings from frame (if present)
+    ) -> Dict[str, Any]:
+        """CPU エミュレータ。規則ベースの値を TypeSafe の Answer 形式に変換して返す。"""
         visual_features = self._extract_visual_features(frame)
-
-        # 2. Context text conditioning
         state_lower = (context_text or "").lower()
+        preset_id = preset.get("id")
 
-        # 3. Simulate iterative discrete diffusion process over questions canvas
-        decisions: Dict[str, Any] = {}
-        total_entropy = 0.0
+        answers: Dict[str, Any] = {}
+        for qid, q in questions.items():
+            if q["type"] == "choice":
+                probs, _ = self._denoise_choice_canvas(list(q["criteria"].keys()), visual_features, state_lower, preset_id)
+                answers[qid] = choice_answer(probs)
+            elif q["type"] == "score":
+                value, _ = self._denoise_score_canvas(qid, visual_features, state_lower, preset_id)
+                answers[qid] = score_answer_from_unit(value, q["criteria"])
+            elif q["type"] == "noul":
+                _, true_p = self._denoise_noul_canvas(qid, visual_features, state_lower, preset_id)
+                answers[qid] = noul_answer(true_p)
 
-        for q in preset.get("questions", []):
-            qid = q["id"]
-            qtype = q.get("type", "choice")
-            qlabel = q.get("label", qid)
-
-            if qtype == "choice":
-                choices = q.get("choices", [])
-                probs, entropy = self._denoise_choice_canvas(choices, visual_features, state_lower, preset.get("id"))
-                total_entropy += entropy
-                best_choice = max(probs.items(), key=lambda x: x[1])
-                decisions[qid] = {
-                    "id": qid,
-                    "type": "choice",
-                    "label": qlabel,
-                    "selected": best_choice[0],
-                    "confidence": round(best_choice[1], 4),
-                    "probabilities": {k: round(v, 4) for k, v in probs.items()}
-                }
-
-            elif qtype == "score":
-                score, conf = self._denoise_score_canvas(qid, visual_features, state_lower, preset.get("id"))
-                decisions[qid] = {
-                    "id": qid,
-                    "type": "score",
-                    "label": qlabel,
-                    "score": round(score, 3),
-                    "confidence": round(conf, 4),
-                    "rubric": q.get("rubric", "")
-                }
-
-            elif qtype == "noul":
-                val, true_p = self._denoise_noul_canvas(qid, visual_features, state_lower, preset.get("id"))
-                decisions[qid] = {
-                    "id": qid,
-                    "type": "noul",
-                    "label": qlabel,
-                    "value": val,
-                    "confidence": round(max(true_p, 1.0 - true_p), 4),
-                    "true_prob": round(true_p, 4),
-                    "false_prob": round(1.0 - true_p, 4),
-                    "hypothesis": q.get("hypothesis", "")
-                }
-
-        diffusion_meta = {
-            "canvas_entropy": round(total_entropy / max(1, len(preset.get("questions", []))), 4),
-            "denoise_confidence": 0.98,
-            "synthesized_state": context_text or visual_features.get("summary", "Scene verified calm and normal.")
-        }
-
-        return decisions, diffusion_meta
+        return {"model": self.model_name, "answers": answers, "usage": {"input_tokens": 0, "output_tokens": 0}}
 
     def _extract_visual_features(self, frame: Optional[np.ndarray]) -> Dict[str, Any]:
         """Extracts native visual sensory features directly from the image frame."""
@@ -479,14 +441,17 @@ class DiffusionGemmaJevEngine:
                 return True
         return False
 
-    def _check_alert_status(self, results: Dict[str, Any]) -> tuple[bool, str]:
-        for qid, qdata in results.items():
-            if qdata.get("type") == "score":
-                if qdata.get("score", 0.0) >= self.alert_threshold:
-                    return True, f"High risk score detected: {qdata.get('label')} = {qdata.get('score'):.2f}"
-            elif qdata.get("type") == "noul":
-                if qdata.get("value") is True and qdata.get("confidence", 0.0) >= self.alert_threshold:
-                    return True, f"Alert condition triggered: {qdata.get('label')} (Conf: {qdata.get('confidence'):.2f})"
+    def _check_alert_status(self, answers: Dict[str, Any], preset_id: str) -> tuple[bool, str]:
+        """Score (0〜1 に正規化) または Noul の P(yes) がしきい値以上ならアラート。"""
+        labels = self.question_labels(preset_id)
+        for qid, a in answers.items():
+            if a["type"] == "score":
+                value = normalized_value(a)
+                if value >= self.alert_threshold:
+                    return True, f"High risk score detected: {labels.get(qid, qid)} = {value:.2f}"
+            elif a["type"] == "noul":
+                if a["noul"] >= self.alert_threshold:
+                    return True, f"Alert condition triggered: {labels.get(qid, qid)} (P(yes): {a['noul']:.2f})"
         return False, ""
 
 

@@ -1,20 +1,29 @@
 id: "nursing_care"
 name: "介護施設・高齢者見守り"
 description: "転倒、ベッド離床、車椅子ずり落ち、夜間徘徊の検知とスタッフ駆けつけ判定"
+# questions は TypeSafe System One の Question 形式 (type / instructions / criteria)。
+# label は画面表示用で、推論サーバーには送らない。
 questions:
   - id: "posture_event"
     type: "choice"
     label: "行動・姿勢状態"
-    choices:
-      - "normal_rest"        # 正常就寝・安静
-      - "sitting_up"          # 起き上がり・離床準備
-      - "wandering"           # 徘徊・歩行不安定
-      - "fall_detected"       # 転倒・床倒臥
+    instructions: "What is the resident in this care-room camera doing?"
+    criteria:
+      normal_rest: "Resting or sleeping safely in bed or a chair"        # 正常就寝・安静
+      sitting_up: "Sitting up or getting out of bed"                     # 起き上がり・離床準備
+      wandering: "Walking around unsteadily or wandering"                # 徘徊・歩行不安定
+      fall_detected: "Fallen or lying on the floor"                      # 転倒・床倒臥
   - id: "care_urgency"
     type: "score"
     label: "介助緊急度"
-    rubric: "Rate immediate injury risk from 0.0 (safe resting) to 1.0 (hard fall or trauma)."
+    instructions: "How urgently does the resident need assistance?"
+    criteria:
+      - "None: resting safely"
+      - "Low: awake but safe"
+      - "Moderate: getting up with some fall risk"
+      - "High: unsteady walking with high fall risk"
+      - "Critical: has fallen or is in acute distress"
   - id: "staff_dispatch"
     type: "noul"
     label: "スタッフ駆けつけ要請"
-    hypothesis: "Patient has fallen or is in acute distress requiring immediate bedside assistance."
+    instructions: "Has the resident fallen or are they in acute distress requiring immediate bedside assistance?"

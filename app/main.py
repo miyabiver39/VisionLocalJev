@@ -20,6 +20,7 @@ from pydantic import BaseModel
 from app.camera import camera_manager
 from app.vision import VisionExtractor
 from app.decision import DecisionEngine
+from app.typesafe import DecisionEngineError
 from app.webhook import webhook_dispatcher, WebhookConfig
 from app.rag import rag_engine, SOPDocument
 from app.visual_rag import visual_rag_engine
@@ -38,7 +39,12 @@ CAMERA_SOURCE = os.getenv("CAMERA_SOURCE", "synthetic")
 VISION_MODE = os.getenv("VISION_MODE", "detector")
 DECISION_ENGINE = os.getenv("DECISION_ENGINE", "diffusion-gemma-jev")
 DJEV_MODE = os.getenv("DJEV_MODE", "embedded")
-DJEV_SERVER_URL = os.getenv("DJEV_SERVER_URL", "http://localhost:8080/v1/djev/decide")
+# DJEV_MODE=remote: TypeSafe System One 互換サーバー (TypeSafe Jev / imajev / Qev / Kev) に POST /v1/systemone
+DJEV_SERVER_URL = os.getenv("DJEV_SERVER_URL", "http://localhost:8765/v1/systemone")
+DJEV_MODEL = os.getenv("DJEV_MODEL", "jev-latest")
+DJEV_API_KEY = os.getenv("DJEV_API_KEY", "")
+DJEV_IMAGE_MODE = os.getenv("DJEV_IMAGE_MODE", "images")  # images (imajev) | state_content (Qev) | none (TypeSafe Jev)
+DJEV_TIMEOUT = float(os.getenv("DJEV_TIMEOUT", "10"))
 DJEV_DIFFUSION_STEPS = int(os.getenv("DJEV_DIFFUSION_STEPS", "8"))
 SAMPLE_FPS = float(os.getenv("SAMPLE_FPS", "1.0"))
 ALERT_THRESHOLD = float(os.getenv("ALERT_THRESHOLD", "0.80"))
@@ -65,7 +71,7 @@ async def lifespan(app: FastAPI):
     """Lifecycle manager to initialize components, default camera, and background pipeline."""
     global vision_extractor, decision_engine, pipeline_task
 
-    logger.info("Initializing Vision-Jev Guard Platform powered by DiffusionGemma-Jev (DJev)...")
+    logger.info(f"Initializing Vision-Jev Guard Platform (decision engine: {DJEV_MODE})...")
 
     vision_extractor = VisionExtractor(mode=VISION_MODE)
     decision_engine = DecisionEngine(
@@ -73,7 +79,11 @@ async def lifespan(app: FastAPI):
         remote_url=DJEV_SERVER_URL,
         presets_dir="app/presets",
         alert_threshold=ALERT_THRESHOLD,
-        diffusion_steps=DJEV_DIFFUSION_STEPS
+        diffusion_steps=DJEV_DIFFUSION_STEPS,
+        remote_model=DJEV_MODEL,
+        api_key=DJEV_API_KEY,
+        image_mode=DJEV_IMAGE_MODE,
+        timeout=DJEV_TIMEOUT,
     )
 
     # Register default primary camera from environment
@@ -242,10 +252,26 @@ async def process_sample(cam_id: str, frame: np.ndarray, preset_id: str, has_mot
         has_motion = True
     vision_latency = vision_res["latency_ms"]
 
-    # 2. Decision Engine Evaluation (DiffusionGemma-Jev Multimodal Evaluation)
-    decision_res = await loop.run_in_executor(
-        None, decision_engine.evaluate_multimodal, frame, preset_id, cam_id, cam_name, state_text
-    )
+    # 2. Decision Engine Evaluation (TypeSafe System One)
+    try:
+        decision_res = await loop.run_in_executor(
+            None, decision_engine.evaluate_multimodal, frame, preset_id, cam_id, cam_name, state_text
+        )
+    except DecisionEngineError as e:
+        # No silent fallback: report the failure to the UI and skip this sample
+        metrics_tracker.record_decision_error()
+        logger.warning(f"Decision engine error for camera '{cam_id}': [{e.kind}] {e.message}")
+        error_event = {
+            "type": "decision_error",
+            "timestamp": time.time(),
+            "time_str": time.strftime("%H:%M:%S", time.localtime()),
+            "camera_id": cam_id,
+            "camera_name": cam_name,
+            "preset_id": preset_id,
+            "error": e.to_dict(),
+        }
+        await broadcast_ws(error_event)
+        return error_event
     if "error" in decision_res:
         # Misconfigured preset: skip this sample instead of stalling the whole loop
         logger.warning(f"Skipping inference for camera '{cam_id}': {decision_res['error']}")
@@ -310,8 +336,11 @@ async def process_sample(cam_id: str, frame: np.ndarray, preset_id: str, has_mot
         },
         "decision": {
             "latency_ms": decision_latency,
-            "engine": "diffusion-gemma-jev",
-            "decisions": decision_res["decisions"],
+            "engine": decision_res["engine"],
+            "model": decision_res["model"],
+            "answers": decision_res["answers"],
+            "labels": decision_res["labels"],
+            "usage": decision_res["usage"],
             "score": decision_res["score"],
             "is_alert": is_alert,
             "alert_reason": alert_reason,
@@ -418,6 +447,8 @@ async def index_page(request: Request):
             "decision_engine": DECISION_ENGINE,
             "djev_mode": DJEV_MODE,
             "djev_steps": DJEV_DIFFUSION_STEPS,
+            "djev_model": DJEV_MODEL,
+            "djev_image_mode": DJEV_IMAGE_MODE,
             "djev_server_url": DJEV_SERVER_URL,
             "alert_threshold": ALERT_THRESHOLD,
             "rag_server_url": RAG_SERVER_URL
@@ -713,7 +744,13 @@ async def trigger_manual_scenario(req: ManualTriggerRequest):
     preset_id = req.preset_id or "security"
     require_valid_preset(preset_id)
 
-    eval_res = decision_engine.evaluate(req.state, preset_id, req.camera_id or "manual", cam_name)
+    try:
+        eval_res = decision_engine.evaluate(req.state, preset_id, req.camera_id or "manual", cam_name)
+    except DecisionEngineError as e:
+        metrics_tracker.record_decision_error()
+        # Upstream (推論サーバー) の失敗はゲートウェイエラーとして返す。CPU エミュレータには切り替えない
+        status = 504 if e.kind == "timeout" else 502
+        raise HTTPException(status_code=status, detail={"decision_engine_error": e.to_dict()})
     rag_res = rag_engine.search_sop(req.state, preset_id)
     eval_res["sop_action"] = rag_res.get("sop")
 

@@ -1,20 +1,29 @@
 id: "security"
 name: "防犯・立ち入り監視"
 description: "不審行動、滞留、侵入、不審物放置の監視および脅威度判定"
+# questions は TypeSafe System One の Question 形式 (type / instructions / criteria)。
+# label は画面表示用で、推論サーバーには送らない。
 questions:
   - id: "action_type"
     type: "choice"
     label: "行動種別"
-    choices:
-      - "normal_passing"     # 正常通過
-      - "loitering"          # 徘徊・滞留
-      - "trespassing"        # 柵越え・侵入
-      - "unattended_object"  # 不審物放置
+    instructions: "What is the person or object in this security camera scene doing?"
+    criteria:
+      normal_passing: "People walking or passing through normally"                 # 正常通過
+      loitering: "A person lingering or wandering around without clear purpose"      # 徘徊・滞留
+      trespassing: "A person climbing a fence or entering a restricted area"         # 柵越え・侵入
+      unattended_object: "A bag, box or package left unattended"                     # 不審物放置
   - id: "threat_score"
     type: "score"
     label: "脅威度スコア"
-    rubric: "Rate security risk from 0 (completely safe) to 1 (critical breach)."
+    instructions: "How serious is the security threat in this scene?"
+    criteria:
+      - "No threat: normal activity"
+      - "Low: slightly unusual but harmless"
+      - "Moderate: suspicious behaviour worth watching"
+      - "High: likely intrusion or suspicious object"
+      - "Critical: active breach requiring immediate response"
   - id: "requires_alert"
     type: "noul"
     label: "警報発報要請"
-    hypothesis: "Immediate security response or staff intervention is required."
+    instructions: "Is an immediate security response or staff intervention required?"
