@@ -239,7 +239,7 @@ async def multi_camera_inference_loop():
             # 1. Vision State Extraction
             t0 = time.time()
             vision_res = await loop.run_in_executor(
-                None, vision_extractor.extract_state, frame, preset_id
+                None, vision_extractor.extract_state, frame, preset_id, cam_id
             )
             state_text = active_override["state"] if is_scenario_override else vision_res["state"]
             if is_scenario_override:
@@ -582,6 +582,8 @@ async def delete_camera(cam_id: str):
     success = camera_manager.remove_camera(cam_id)
     if not success:
         raise HTTPException(status_code=404, detail="Camera not found")
+    if vision_extractor:
+        vision_extractor.reset_camera(cam_id)
 
     await broadcast_ws({
         "type": "cameras_updated",
