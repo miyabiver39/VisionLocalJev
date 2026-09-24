@@ -26,6 +26,10 @@ services:
       # RAG Configuration (Embedded by default, or point to external server)
       - RAG_SERVER_URL=
 
+      # Security: set both to require HTTP Basic auth on all pages/APIs/feeds/WebSocket
+      - AUTH_USERNAME=${AUTH_USERNAME:-}
+      - AUTH_PASSWORD=${AUTH_PASSWORD:-}
+
     volumes:
       - ./app/presets:/app/app/presets:ro
 

@@ -24,6 +24,7 @@ from app.webhook import webhook_dispatcher, WebhookConfig
 from app.rag import rag_engine, SOPDocument
 from app.visual_rag import visual_rag_engine
 from app.metrics import metrics_tracker
+from app.security import BasicAuthMiddleware, load_credentials, validate_http_url
 
 # Configure Logging
 logging.basicConfig(
@@ -42,6 +43,8 @@ DJEV_DIFFUSION_STEPS = int(os.getenv("DJEV_DIFFUSION_STEPS", "8"))
 SAMPLE_FPS = float(os.getenv("SAMPLE_FPS", "1.0"))
 ALERT_THRESHOLD = float(os.getenv("ALERT_THRESHOLD", "0.80"))
 RAG_SERVER_URL = os.getenv("RAG_SERVER_URL", "")
+MAX_UPLOAD_IMAGE_BYTES = int(os.getenv("MAX_UPLOAD_IMAGE_BYTES", str(10 * 1024 * 1024)))
+AUTH_CREDENTIALS = load_credentials()
 
 # Global Components
 vision_extractor: Optional[VisionExtractor] = None
@@ -111,6 +114,14 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Vision-Jev Guard Platform", version="0.2.0", lifespan=lifespan)
+
+# Optional HTTP Basic auth for all HTTP + WebSocket routes (AUTH_USERNAME / AUTH_PASSWORD)
+app.add_middleware(BasicAuthMiddleware, credentials=AUTH_CREDENTIALS)
+if AUTH_CREDENTIALS is None:
+    logger.warning(
+        "AUTH_USERNAME / AUTH_PASSWORD are not set: the dashboard, camera feeds and APIs are "
+        "accessible without authentication. Set them before exposing this server on a network."
+    )
 
 # Mount static files and templates
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
@@ -523,6 +534,11 @@ async def list_cameras():
 async def add_camera(req: CameraCreateRequest):
     """Registers and starts a new camera (RTSP, JPEG URL, Webcam, or Synthetic)."""
     require_valid_preset(req.preset_id)
+    if req.source_type.lower() == "jpeg_url":
+        try:
+            validate_http_url(req.source_url)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
     try:
         cam = camera_manager.add_camera(
             camera_id=req.camera_id,
@@ -744,6 +760,9 @@ async def register_visual_reference(req: VisualRAGRegisterRequest):
         b64_str = req.image_base64
         if "," in b64_str:
             b64_str = b64_str.split(",", 1)[1]
+        # Base64 inflates by 4/3: reject oversized payloads before decoding
+        if len(b64_str) * 3 // 4 > MAX_UPLOAD_IMAGE_BYTES:
+            raise HTTPException(status_code=413, detail=f"Image exceeds {MAX_UPLOAD_IMAGE_BYTES} bytes")
         img_bytes = base64.b64decode(b64_str)
         img_arr = np.frombuffer(img_bytes, dtype=np.uint8)
         frame = cv2.imdecode(img_arr, cv2.IMREAD_COLOR)
@@ -759,6 +778,8 @@ async def register_visual_reference(req: VisualRAGRegisterRequest):
             description=req.description or ""
         )
         return JSONResponse({"success": True, "reference": ref.to_dict()})
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 

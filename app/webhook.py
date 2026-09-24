@@ -5,7 +5,9 @@ import threading
 import requests
 from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, Any, List, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
+
+from app.security import validate_http_url
 
 logger = logging.getLogger("vision_jev.webhook")
 
@@ -20,6 +22,18 @@ class WebhookConfig(BaseModel):
     enabled: bool = True
     min_score: float = 0.75
     cooldown_seconds: float = 30.0
+
+    @field_validator("url")
+    @classmethod
+    def _check_url(cls, v: str) -> str:
+        return validate_http_url(v)
+
+    @field_validator("format")
+    @classmethod
+    def _check_format(cls, v: str) -> str:
+        if v not in ("slack", "discord", "generic_json"):
+            raise ValueError("format must be one of: slack, discord, generic_json")
+        return v
 
 
 class WebhookDispatcher:
