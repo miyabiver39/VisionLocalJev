@@ -139,3 +139,26 @@ def test_webhook_cooldown_is_atomic_under_concurrency():
             t.join()
         d.executor.shutdown(wait=True)
     assert send.call_count == 1
+
+
+def test_visual_anomaly_with_linked_sop_produces_alert(client):
+    """Regression for #12: the linked SOP path must not raise (SOPDocument has no to_dict)."""
+    import asyncio
+    from app import main
+
+    fake_match = {
+        "top_match": {"ref_id": "r", "title": "外周フェンス乗り越え侵入", "is_anomaly": True,
+                      "similarity": 0.97, "sop_id": "sop_trespass_breach"},
+        "similarity": 0.97, "anomaly_score": 0.9, "is_anomalous": True, "matches": [], "latency_ms": 0.1,
+    }
+    frame = np.zeros((180, 320, 3), dtype=np.uint8)
+    with mock.patch.object(main.visual_rag_engine, "match_frame", return_value=fake_match), \
+         mock.patch.object(main.webhook_dispatcher, "dispatch_alert_async") as dispatch:
+        result = asyncio.run(main.process_sample("cam_main", frame, "security", False))
+
+    assert result["decision"]["is_alert"] is True
+    assert result["decision"]["alert_reason"].startswith("Visual Anomaly")
+    assert result["rag"]["source"] == "visual_example_rag"
+    assert result["rag"]["sop"]["id"] == "sop_trespass_breach"
+    payload = dispatch.call_args[0][0]
+    assert payload["score"] >= 0.9 and payload["alert_reason"]

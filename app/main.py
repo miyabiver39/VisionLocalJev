@@ -208,6 +208,156 @@ async def broadcast_ws(message: dict):
 
 # ===================== Background Inference Pipeline =====================
 
+async def process_sample(cam_id: str, frame: np.ndarray, preset_id: str, has_motion: bool) -> Optional[Dict[str, Any]]:
+    """Runs one camera sample through Vision -> DJev -> SOP RAG -> Visual RAG -> Webhook -> WS broadcast.
+
+    Returns the composite result broadcast to the WebUI, or None if the sample was skipped.
+    """
+    cam = camera_manager.get_camera(cam_id)
+    cam_name = cam.name if cam else cam_id
+
+    loop = asyncio.get_running_loop()
+
+    # Check if this camera has an active manual test scenario override
+    now = time.time()
+    active_override = scenario_overrides.get(cam_id)
+    is_scenario_override = False
+    remaining_override_sec = 0
+
+    if active_override:
+        if now < active_override.get("expires_at", 0):
+            preset_id = active_override.get("preset_id", preset_id)
+            is_scenario_override = True
+            remaining_override_sec = max(1, int(active_override["expires_at"] - now))
+        else:
+            scenario_overrides.pop(cam_id, None)
+
+    # 1. Vision State Extraction
+    t0 = time.time()
+    vision_res = await loop.run_in_executor(
+        None, vision_extractor.extract_state, frame, preset_id, cam_id
+    )
+    state_text = active_override["state"] if is_scenario_override else vision_res["state"]
+    if is_scenario_override:
+        has_motion = True
+    vision_latency = vision_res["latency_ms"]
+
+    # 2. Decision Engine Evaluation (DiffusionGemma-Jev Multimodal Evaluation)
+    decision_res = await loop.run_in_executor(
+        None, decision_engine.evaluate_multimodal, frame, preset_id, cam_id, cam_name, state_text
+    )
+    if "error" in decision_res:
+        # Misconfigured preset: skip this sample instead of stalling the whole loop
+        logger.warning(f"Skipping inference for camera '{cam_id}': {decision_res['error']}")
+        return None
+    decision_latency = decision_res["latency_ms"]
+
+    # 3. RAG Knowledge Retrieval (Standard Operating Procedure)
+    rag_res = await loop.run_in_executor(
+        None, rag_engine.search_sop, state_text, preset_id
+    )
+    rag_latency = rag_res.get("latency_ms", 0.0)
+    sop_action = rag_res.get("sop")
+
+    # 3.5 Visual Example RAG (Image-based cosine reference matching)
+    visual_rag_res = await loop.run_in_executor(
+        None, visual_rag_engine.match_frame, frame, preset_id
+    )
+    # If Visual RAG found a high-confidence anomaly reference with linked SOP, prioritize it
+    if visual_rag_res.get("is_anomalous") and (visual_rag_res.get("top_match") or {}).get("sop_id"):
+        linked_sop_id = visual_rag_res["top_match"]["sop_id"]
+        linked_sop = rag_engine.documents.get(linked_sop_id)
+        if linked_sop:
+            sop_action = linked_sop.model_dump()
+            rag_res["matched"] = True
+            rag_res["source"] = "visual_example_rag"
+            rag_res["relevance_score"] = visual_rag_res["similarity"]
+
+    # 4. Metrics & Telemetry Update
+    visual_anomalous = bool(visual_rag_res.get("is_anomalous", False))
+    is_alert = decision_res["is_alert"] or visual_anomalous
+    alert_score = decision_res["score"]
+    alert_reason = ""
+    if decision_res["is_alert"]:
+        alert_reason = decision_res["alert_reason"]
+    elif visual_anomalous:
+        top_title = (visual_rag_res.get("top_match") or {}).get("title", "")
+        alert_reason = f"Visual Anomaly: {top_title}" if top_title else "Visual Anomaly detected"
+        # Visual-only alerts carry the anomaly score so webhook min_score filters don't drop them
+        alert_score = max(alert_score, float(visual_rag_res.get("anomaly_score", 0.0)))
+    metrics_tracker.update_inference_telemetry(
+        vision_latency, decision_latency, rag_latency, is_alert
+    )
+
+    # 5. Composite Event Assembly
+    time_now = time.time()
+    time_str = time.strftime("%H:%M:%S", time.localtime(time_now))
+    composite_result = {
+        "type": "decision_update",
+        "timestamp": time_now,
+        "time_str": time_str,
+        "camera_id": cam_id,
+        "camera_name": cam_name,
+        "preset_id": preset_id,
+        "preset_name": decision_res.get("preset_name", preset_id),
+        "state": state_text,
+        "has_motion": has_motion,
+        "is_scenario_override": is_scenario_override,
+        "remaining_override_sec": remaining_override_sec,
+        "vision": {
+            "latency_ms": vision_latency,
+            "mode": vision_res["mode"]
+        },
+        "decision": {
+            "latency_ms": decision_latency,
+            "engine": "diffusion-gemma-jev",
+            "decisions": decision_res["decisions"],
+            "score": decision_res["score"],
+            "is_alert": is_alert,
+            "alert_reason": alert_reason,
+            "alert_threshold": decision_res["alert_threshold"],
+            "djev": decision_res.get("djev", {})
+        },
+        "visual_rag": {
+            "top_match": visual_rag_res.get("top_match"),
+            "similarity": visual_rag_res.get("similarity", 0.0),
+            "anomaly_score": visual_rag_res.get("anomaly_score", 0.0),
+            "is_anomalous": visual_rag_res.get("is_anomalous", False),
+            "latency_ms": visual_rag_res.get("latency_ms", 0.0)
+        },
+        "rag": {
+            "source": rag_res.get("source", "embedded_rag"),
+            "matched": rag_res.get("matched", False),
+            "relevance_score": rag_res.get("relevance_score", 0.0),
+            "latency_ms": rag_latency,
+            "sop": sop_action
+        },
+        "metrics": metrics_tracker.get_system_metrics()
+    }
+
+    # 6. If Alert Triggered, Dispatch WebHook and Record History
+    if is_alert:
+        alert_payload = {
+            "camera_id": cam_id,
+            "camera_name": cam_name,
+            "state": state_text,
+            "score": alert_score,
+            "confidence": alert_score,
+            "alert_reason": alert_reason,
+            "timestamp": time_now,
+            "time_str": time_str,
+            "sop_action": sop_action
+        }
+        webhook_dispatcher.dispatch_alert_async(alert_payload)
+
+        # Record in-memory event log (bounded by deque maxlen)
+        recent_event_log.append(alert_payload)
+
+    # 7. Broadcast Telemetry to connected WebUI clients
+    await broadcast_ws(composite_result)
+    return composite_result
+
+
 async def multi_camera_inference_loop():
     """
     Asynchronous continuous loop scheduling inference across N cameras with zero-latency drop policy.
@@ -228,148 +378,7 @@ async def multi_camera_inference_loop():
             cam_id, frame, preset_id, has_motion = sample
             metrics_tracker.record_frame_sampled()
 
-            cam = camera_manager.get_camera(cam_id)
-            cam_name = cam.name if cam else cam_id
-
-            loop = asyncio.get_running_loop()
-
-            # Check if this camera has an active manual test scenario override
-            now = time.time()
-            active_override = scenario_overrides.get(cam_id)
-            is_scenario_override = False
-            remaining_override_sec = 0
-
-            if active_override:
-                if now < active_override.get("expires_at", 0):
-                    preset_id = active_override.get("preset_id", preset_id)
-                    is_scenario_override = True
-                    remaining_override_sec = max(1, int(active_override["expires_at"] - now))
-                else:
-                    scenario_overrides.pop(cam_id, None)
-
-            # 1. Vision State Extraction
-            t0 = time.time()
-            vision_res = await loop.run_in_executor(
-                None, vision_extractor.extract_state, frame, preset_id, cam_id
-            )
-            state_text = active_override["state"] if is_scenario_override else vision_res["state"]
-            if is_scenario_override:
-                has_motion = True
-            vision_latency = vision_res["latency_ms"]
-
-            # 2. Decision Engine Evaluation (DiffusionGemma-Jev Multimodal Evaluation)
-            decision_res = await loop.run_in_executor(
-                None, decision_engine.evaluate_multimodal, frame, preset_id, cam_id, cam_name, state_text
-            )
-            if "error" in decision_res:
-                # Misconfigured preset: skip this sample instead of stalling the whole loop
-                logger.warning(f"Skipping inference for camera '{cam_id}': {decision_res['error']}")
-                continue
-            decision_latency = decision_res["latency_ms"]
-
-            # 3. RAG Knowledge Retrieval (Standard Operating Procedure)
-            rag_res = await loop.run_in_executor(
-                None, rag_engine.search_sop, state_text, preset_id
-            )
-            rag_latency = rag_res.get("latency_ms", 0.0)
-            sop_action = rag_res.get("sop")
-
-            # 3.5 Visual Example RAG (Image-based cosine reference matching)
-            visual_rag_res = await loop.run_in_executor(
-                None, visual_rag_engine.match_frame, frame, preset_id
-            )
-            # If Visual RAG found a high-confidence anomaly reference with linked SOP, prioritize it
-            if visual_rag_res.get("is_anomalous") and (visual_rag_res.get("top_match") or {}).get("sop_id"):
-                linked_sop_id = visual_rag_res["top_match"]["sop_id"]
-                linked_sop = rag_engine.documents.get(linked_sop_id)
-                if linked_sop:
-                    sop_action = linked_sop.to_dict()
-                    rag_res["matched"] = True
-                    rag_res["source"] = "visual_example_rag"
-                    rag_res["relevance_score"] = visual_rag_res["similarity"]
-
-            # 4. Metrics & Telemetry Update
-            visual_anomalous = bool(visual_rag_res.get("is_anomalous", False))
-            is_alert = decision_res["is_alert"] or visual_anomalous
-            alert_score = decision_res["score"]
-            alert_reason = ""
-            if decision_res["is_alert"]:
-                alert_reason = decision_res["alert_reason"]
-            elif visual_anomalous:
-                top_title = (visual_rag_res.get("top_match") or {}).get("title", "")
-                alert_reason = f"Visual Anomaly: {top_title}" if top_title else "Visual Anomaly detected"
-                # Visual-only alerts carry the anomaly score so webhook min_score filters don't drop them
-                alert_score = max(alert_score, float(visual_rag_res.get("anomaly_score", 0.0)))
-            metrics_tracker.update_inference_telemetry(
-                vision_latency, decision_latency, rag_latency, is_alert
-            )
-
-            # 5. Composite Event Assembly
-            time_now = time.time()
-            time_str = time.strftime("%H:%M:%S", time.localtime(time_now))
-            composite_result = {
-                "type": "decision_update",
-                "timestamp": time_now,
-                "time_str": time_str,
-                "camera_id": cam_id,
-                "camera_name": cam_name,
-                "preset_id": preset_id,
-                "preset_name": decision_res.get("preset_name", preset_id),
-                "state": state_text,
-                "has_motion": has_motion,
-                "is_scenario_override": is_scenario_override,
-                "remaining_override_sec": remaining_override_sec,
-                "vision": {
-                    "latency_ms": vision_latency,
-                    "mode": vision_res["mode"]
-                },
-                "decision": {
-                    "latency_ms": decision_latency,
-                    "engine": "diffusion-gemma-jev",
-                    "decisions": decision_res["decisions"],
-                    "score": decision_res["score"],
-                    "is_alert": is_alert,
-                    "alert_reason": alert_reason,
-                    "alert_threshold": decision_res["alert_threshold"],
-                    "djev": decision_res.get("djev", {})
-                },
-                "visual_rag": {
-                    "top_match": visual_rag_res.get("top_match"),
-                    "similarity": visual_rag_res.get("similarity", 0.0),
-                    "anomaly_score": visual_rag_res.get("anomaly_score", 0.0),
-                    "is_anomalous": visual_rag_res.get("is_anomalous", False),
-                    "latency_ms": visual_rag_res.get("latency_ms", 0.0)
-                },
-                "rag": {
-                    "source": rag_res.get("source", "embedded_rag"),
-                    "matched": rag_res.get("matched", False),
-                    "relevance_score": rag_res.get("relevance_score", 0.0),
-                    "latency_ms": rag_latency,
-                    "sop": sop_action
-                },
-                "metrics": metrics_tracker.get_system_metrics()
-            }
-
-            # 6. If Alert Triggered, Dispatch WebHook and Record History
-            if is_alert:
-                alert_payload = {
-                    "camera_id": cam_id,
-                    "camera_name": cam_name,
-                    "state": state_text,
-                    "score": alert_score,
-                    "confidence": alert_score,
-                    "alert_reason": alert_reason,
-                    "timestamp": time_now,
-                    "time_str": time_str,
-                    "sop_action": sop_action
-                }
-                webhook_dispatcher.dispatch_alert_async(alert_payload)
-
-                # Record in-memory event log (bounded by deque maxlen)
-                recent_event_log.append(alert_payload)
-
-            # 7. Broadcast Telemetry to connected WebUI clients
-            await broadcast_ws(composite_result)
+            await process_sample(cam_id, frame, preset_id, has_motion)
 
         except asyncio.CancelledError:
             break
