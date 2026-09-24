@@ -6,7 +6,10 @@
 [![Tests](https://github.com/miyabiver39/VisionLocalJev/actions/workflows/tests.yml/badge.svg)](https://github.com/miyabiver39/VisionLocalJev/actions/workflows/tests.yml)
 [![Python 3.12](https://img.shields.io/badge/Python-3.12-brightgreen.svg)](https://www.python.org/)
 
-**Vision-Jev Guard Platform** は、監視カメラ（HLS / RTSP / YouTube / Webカメラ / HTTP JPEG）の映像フレームから、Google DeepMindの **DiffusionGemma** を応用した最新の非自己回帰型決定エンジン **`DiffusionGemma-Jev` (DJev: `Davipar/djev-dev` 互換)** を用いて、型安全（Choice / Score / Noul）かつ超低遅延（~4ms）で状況判定を行うエッジ監視統合基盤です。
+**Vision-Jev Guard Platform** は、監視カメラ（HLS / RTSP / YouTube / Webカメラ / HTTP JPEG）の映像フレームから、Google DeepMind の **DiffusionGemma** 上に構築された OSS の型付き判定システム **DJev（[`Davipar/djev-dev`](https://github.com/Davipar/djev-dev)）** の設問形式（Choice / Score / Noul）で状況判定を行うエッジ監視統合基盤です。
+
+> [!NOTE]
+> デフォルトの `DJEV_MODE=embedded` は、GPU なしで動かすための **CPU エミュレータ**（OpenCV 特徴量＋ルールベースのロジット計算）であり、DiffusionGemma モデル本体は実行しません。1 フレームあたりの処理時間は Ryzen 7 5700X・720p で約 10ms（`python scripts/benchmark_pipeline.py` で計測）です。
 
 異常事態を検知した際は、**内包型SOP RAG（緊急初動手順ナレッジベース）**が状況に応じた対応マニュアルをリアルタイムに引き当て、**WebHook（Slack / Discord / 汎用JSON）**経由で外部警備システムへ自動通知します。
 
@@ -58,7 +61,7 @@
 
 テキストマニュアル（SOP）の引き当てだけでなく、**「画像そのものをベクトル登録し、現場の正常・異常の過去事例とミリ秒単位で照合する」** Visual Example RAG エンジンを標準搭載しています。
 
-- **512次元マルチスケール特徴記述子**: Spatial 4x4 Grid HSV色相分布(192) + Sobel HOGエッジ勾配(160) + 空間テクスチャモーメント(160) をCPUで **1〜2ms** で超高速抽出（L2正規化）。
+- **512次元マルチスケール特徴記述子**: Spatial 4x4 Grid HSV色相分布(192) + Sobel HOGエッジ勾配(160) + 空間テクスチャモーメント(160) をCPUで抽出（L2正規化、720p フレームで照合込み約 5ms）。
 - **コサイン類似度 k-NN検索 & 異常度（Anomaly Score）自動算出**: 登録された「正常ベースライン画像」との乖離度と「過去の事故事例画像」との類似度から、リアルタイムにアノマリーを検知。
 - **UIからの画像登録 & ギャラリー**: WebUIの「画像RAG」モーダルから、現場写真や異常事例画像をいつでもドラッグ＆ドロップで追加・管理可能。
 - **6大プリセットの初期リファレンス画像（計12枚）を自動シード登録済み**。
@@ -144,7 +147,7 @@ python scripts/test_visual_rag.py
 |---|---|---|
 | `CAMERA_SOURCE` | `synthetic` | 初期カメラソース（`synthetic` / `0` / HLS / RTSP / YouTube URL） |
 | `DECISION_ENGINE` | `diffusion-gemma-jev` | 決定エンジン種別（`diffusion-gemma-jev`） |
-| `DJEV_MODE` | `embedded` | `embedded`（CPUローカル内包型）または `remote`（外部vLLMサーバー） |
+| `DJEV_MODE` | `embedded` | `embedded`（CPU エミュレータ）または `remote`（外部推論サーバーへ POST。現状のペイロードは djev-dev の `/v1/request` API と互換ではありません。#15 参照） |
 | `DJEV_SERVER_URL` | `http://localhost:8080/v1/djev/decide` | `DJEV_MODE=remote` 時の接続先エンドポイント |
 | `DJEV_DIFFUSION_STEPS` | `8` | 離散拡散デノイジングステップ数（2〜32） |
 | `SAMPLE_FPS` | `1.0` | 推論サンプリングFPS（0.1〜10.0） |
