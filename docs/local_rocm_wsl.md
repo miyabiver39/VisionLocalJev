@@ -112,3 +112,27 @@ imajev-2b で 1 リクエスト（3 問、選択肢の並べ替え 4 回）約 3
   入力 683 トークンで、評価スクリプトの 640×360 画像より画像トークンが多いためです。
 - 起動直後や新しい画像サイズでの初回は、Triton カーネルのコンパイルで 30 秒以上かかり、`DJEV_TIMEOUT` を超えるとタイムアウトエラーになります
   （フォールバックはせず、画面に「判定エンジンエラー」を表示）。本番では起動時に 1 回ウォームアップのリクエストを送ってください。
+
+## Docker Compose で起動する（アプリ + imajev）
+
+WSL に手作業で環境を作らなくても、Docker Desktop だけでアプリと imajev をまとめて起動できます。
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.imajev-amd.yml up -d --build
+```
+
+- imajev コンテナ（`docker/imajev/Dockerfile.rocm`）には、ROCm 7.2.4 ランタイム・librocdxg・PyTorch 2.14（ROCm 7.2）・imajev（コミット固定）が入ります。
+  ホストの `/dev/dxg` と `/usr/lib/wsl` を渡すことで、コンテナ内から Radeon を使います。
+- 起動時に、ベースモデルとアダプタを固定リビジョンでボリューム `imajev-data` に用意し、ウォームアップ推論（960×540 と 640×360）で GPU カーネルをコンパイルしてから healthy になります。
+  アプリは `depends_on: condition: service_healthy` で imajev の準備完了を待ってから起動するため、起動直後のタイムアウトは起きません。
+- Triton は実行時に C コンパイラでランチャーをビルドするため、イメージに `gcc` が必要です（無いと flash-linear-attention が CPU にフォールバックし、非常に遅くなる）。
+
+実測（RX 9060 XT 16GB、Docker Desktop 4.88、imajev-4b、`IMAJEV_ROTATIONS=1`）:
+
+| 項目 | 値 |
+|---|---|
+| 初回のダウンロード | ベースモデル + アダプタ 約 9GB |
+| モデルの読み込み | 約 31 秒 |
+| ウォームアップ（初回起動、カーネルのコンパイル） | 960×540: 172 秒 / 640×360: 28 秒 |
+| ウォームアップ（再起動、`TRITON_CACHE_DIR` のキャッシュあり） | 960×540: 17.5 秒 / 640×360: 4.4 秒 |
+| アプリ（合成カメラ 960×540）からの判定 | 1 リクエスト（画像 1 枚・3 問）約 3.3 秒 |

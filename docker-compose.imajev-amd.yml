@@ -1,0 +1,39 @@
+# imajev (画像入力つき TypeSafe System One 互換モデル) を AMD GPU で起動し、アプリの判定エンジンに接続する。
+# 対象: Windows 11 + Docker Desktop (WSL2 バックエンド) + AMD Radeon (ROCm 対応世代、Adrenalin 26.2.2 以降)
+#
+#   docker compose -f docker-compose.yml -f docker-compose.imajev-amd.yml up -d --build
+#
+# 初回はベースモデルとアダプタのダウンロード (4b で約 9GB) と GPU カーネルのコンパイルがあり、
+# imajev が healthy になるまで 10〜20 分程度かかる。2 回目以降はボリューム imajev-data のキャッシュを使う。
+services:
+  imajev:
+    build:
+      context: .
+      dockerfile: docker/imajev/Dockerfile.rocm
+    image: visionlocaljev-imajev:rocm
+    container_name: vision-guard-imajev
+    restart: unless-stopped
+    environment:
+      - IMAJEV_SIZE=${IMAJEV_SIZE:-4b}              # 2b (VRAM 約 7GB) | 4b (約 11GB) | 9b (約 19GB、16GB GPU では不可)
+      - IMAJEV_ROTATIONS=${IMAJEV_ROTATIONS:-1}     # 1 = 最速 / 4 = 選択肢の並べ替え平均 (約 4 倍遅い)
+    devices:
+      - /dev/dxg:/dev/dxg                           # WSL2 の GPU デバイス
+    volumes:
+      - /usr/lib/wsl:/usr/lib/wsl:ro                # libdxcore.so など WSL の GPU ライブラリ
+      - imajev-data:/data                           # モデル・アダプタ・Triton カーネルのキャッシュ
+    ports:
+      - "127.0.0.1:${IMAJEV_PORT:-8765}:8765"       # ホストからの確認用 (localhost のみ)
+
+  vision-guard:
+    environment:
+      - DJEV_MODE=remote
+      - DJEV_SERVER_URL=http://imajev:8765/v1/systemone
+      - DJEV_MODEL=imajev-${IMAJEV_SIZE:-4b}
+      - DJEV_IMAGE_MODE=images
+      - DJEV_TIMEOUT=${DJEV_TIMEOUT:-30}
+    depends_on:
+      imajev:
+        condition: service_healthy
+
+volumes:
+  imajev-data:

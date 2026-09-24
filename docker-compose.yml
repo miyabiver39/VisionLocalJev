@@ -1,5 +1,16 @@
+# Vision-Jev Guard Platform
+#
+#   アプリのみ (判定は CPU エミュレータ):
+#     docker compose up -d --build
+#
+#   AMD GPU (Windows + WSL2 / Docker Desktop) で imajev を同時に起動:
+#     docker compose -f docker-compose.yml -f docker-compose.imajev-amd.yml up -d --build
+#
+#   NVIDIA GPU で imajev を同時に起動:
+#     docker compose -f docker-compose.yml -f docker-compose.imajev-nvidia.yml up -d --build
+#
+# 設定は環境変数 または .env で上書きできる (.env.example を参照)。
 services:
-  # Main Vision-Jev Guard Platform (Powered by DiffusionGemma-Jev)
   vision-guard:
     build:
       context: .
@@ -8,26 +19,24 @@ services:
     container_name: vision-guard-platform
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "${PORT:-8000}:8000"
     environment:
-      # Video & Device Configuration
-      - CAMERA_SOURCE=synthetic       # synthetic, 0, /dev/video0, rtsp://..., or YouTube URL
-      - DEVICE=cpu                    # cpu | cuda
-      - SAMPLE_FPS=1.0                # Frame inference sample rate per camera
-      - ALERT_THRESHOLD=0.80          # Alert trigger threshold (0.1 - 0.99)
+      # Video
+      - CAMERA_SOURCE=${CAMERA_SOURCE:-synthetic}   # synthetic, 0, /dev/video0, rtsp://..., HLS or YouTube URL
+      - SAMPLE_FPS=${SAMPLE_FPS:-1.0}               # Inference sampling rate per camera
+      - ALERT_THRESHOLD=${ALERT_THRESHOLD:-0.80}    # Alert trigger threshold (0.1 - 0.99)
+      - VISION_MODE=${VISION_MODE:-detector}        # detector (CPU CV) | mock | vlm
 
-      # Vision & DiffusionGemma-Jev (DJev) Engine
-      - VISION_MODE=detector          # detector (CPU Real CV) | mock | vlm
-      - DECISION_ENGINE=diffusion-gemma-jev
-      - DJEV_MODE=embedded            # embedded (CPU emulator) | remote (TypeSafe System One compatible server)
-      - DJEV_SERVER_URL=http://host.docker.internal:8765/v1/systemone
-      - DJEV_MODEL=jev-latest         # jev-latest / imajev-4b / qev:0.8b ...
+      # Decision engine (TypeSafe System One)
+      - DJEV_MODE=${DJEV_MODE:-embedded}            # embedded (CPU emulator) | remote (TypeSafe System One compatible server)
+      - DJEV_SERVER_URL=${DJEV_SERVER_URL:-http://host.docker.internal:8765/v1/systemone}
+      - DJEV_MODEL=${DJEV_MODEL:-jev-latest}        # jev-latest / imajev-4b / qev:0.8b ...
       - DJEV_API_KEY=${DJEV_API_KEY:-}
-      - DJEV_IMAGE_MODE=images        # images (imajev) | state_content (Qev) | none (TypeSafe Jev / Kev)
-      - DJEV_TIMEOUT=10
+      - DJEV_IMAGE_MODE=${DJEV_IMAGE_MODE:-images}  # images (imajev) | state_content (Qev) | none (TypeSafe Jev / Kev)
+      - DJEV_TIMEOUT=${DJEV_TIMEOUT:-10}
 
-      # RAG Configuration (Embedded by default, or point to external server)
-      - RAG_SERVER_URL=
+      # RAG (embedded by default, or an external RAG server)
+      - RAG_SERVER_URL=${RAG_SERVER_URL:-}
 
       # Security: set both to require HTTP Basic auth on all pages/APIs/feeds/WebSocket
       - AUTH_USERNAME=${AUTH_USERNAME:-}
@@ -41,15 +50,3 @@ services:
     # Linuxホストの物理Webカメラをマウントする場合（Windows/Macではコメントアウト推奨）
     # devices:
     #   - "/dev/video0:/dev/video0"
-
-    # カメラデバイス権限エラー（Permission denied）が発生する場合に有効化
-    # privileged: true
-
-    # NVIDIA GPU（CUDA/TensorRT）を利用する場合の定義
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: 1
-    #           capabilities: [gpu]

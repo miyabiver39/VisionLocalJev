@@ -1,0 +1,38 @@
+# imajev 推論サーバー: NVIDIA GPU (CUDA) 用。社内の H100 などで使う想定 (docker-compose.imajev-nvidia.yml)。
+# 注意: この構成はビルドのみ確認済みで、NVIDIA GPU 上での実行は未検証。
+FROM python:3.12-slim
+
+# PyTorch 2.14 の CUDA 版は cu130 以降 (NVIDIA ドライバ 580 以降が必要)
+ARG TORCH_INDEX=https://download.pytorch.org/whl/cu130
+ARG IMAJEV_COMMIT=4e623a8a51aa319405a0f32e6b73a8ce73416800
+
+ENV PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
+
+# gcc: Triton (flash-linear-attention の GPU カーネル) が実行時にランチャーをビルドするのに必要
+RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates gcc libc6-dev && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --upgrade pip && pip install torch==2.14.0 torchvision==0.29.0 --index-url "${TORCH_INDEX}"
+COPY docker/imajev/requirements.txt /tmp/requirements.txt
+RUN pip install -r /tmp/requirements.txt
+
+RUN git clone https://github.com/mohit67890/imajev /opt/imajev \
+    && cd /opt/imajev && git checkout -q "${IMAJEV_COMMIT}" \
+    && pip install --no-deps -e /opt/imajev
+
+COPY docker/imajev/entrypoint.py /opt/entrypoint.py
+
+ENV HF_HOME=/data/hf \
+    TRITON_CACHE_DIR=/data/triton-cache \
+    IMAJEV_DATA=/data \
+    IMAJEV_SIZE=4b \
+    IMAJEV_ROTATIONS=1 \
+    PORT=8765
+
+RUN useradd --create-home --uid 10001 imajev && mkdir -p /data && chown -R imajev:imajev /data /opt/imajev
+USER imajev
+WORKDIR /opt/imajev
+VOLUME ["/data"]
+EXPOSE 8765
+
+HEALTHCHECK --interval=15s --timeout=5s --start-period=30m --retries=3 CMD test -f /tmp/imajev-ready
+CMD ["python", "/opt/entrypoint.py"]

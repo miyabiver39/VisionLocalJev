@@ -1,0 +1,12 @@
+.git
+.venv
+.venv-dg
+**/__pycache__
+.pytest_cache
+.claude
+app/data
+app/static/sample_videos
+*.mp4
+cookies.txt
+youtube_cookies.txt
+.env

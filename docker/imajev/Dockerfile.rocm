@@ -1,0 +1,68 @@
+# imajev (TypeSafe System One 互換・画像入力つき判定モデル) の推論サーバー: AMD GPU / WSL2 (Docker Desktop) 用
+#
+# Triton (flash-linear-attention の GPU カーネル) は実行時に C コンパイラを使うため gcc を入れている。
+# WSL2 では GPU を /dev/dxg 経由で使うため、ROCm ランタイムに加えて librocdxg が必要。
+# ホストの /usr/lib/wsl (libdxcore.so) をマウントし、/dev/dxg を渡して起動する (docker-compose.imajev-amd.yml)。
+# 確認環境: Radeon RX 9060 XT 16GB / Adrenalin 26.8.1 / Docker Desktop 4.88
+FROM ubuntu:24.04
+
+ARG ROCM_VERSION=7.2.4
+ARG AMDGPU_DEB=amdgpu-install_7.2.4.70204-1_all.deb
+ARG ROCDXG_VERSION=1.2.2
+ARG TORCH_INDEX=https://download.pytorch.org/whl/rocm7.2
+ARG IMAJEV_COMMIT=4e623a8a51aa319405a0f32e6b73a8ce73416800
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
+# ROCm ランタイム + ROCDXG (WSL 用 GPU ブリッジ)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates wget git gnupg python3 python3-venv python3-dev gcc libc6-dev \
+    && cd /tmp \
+    && wget -q "https://repo.radeon.com/amdgpu-install/${ROCM_VERSION}/ubuntu/noble/${AMDGPU_DEB}" \
+    && apt-get install -y --no-install-recommends "./${AMDGPU_DEB}" \
+    && apt-get update && apt-get install -y --no-install-recommends rocm-hip-runtime \
+    && wget -q "https://github.com/ROCm/librocdxg/releases/download/v${ROCDXG_VERSION}/rocdxg-roct_${ROCDXG_VERSION}_amd64.deb" \
+    && apt-get install -y --no-install-recommends "./rocdxg-roct_${ROCDXG_VERSION}_amd64.deb" \
+    && rm -f /tmp/*.deb && rm -rf /var/lib/apt/lists/*
+
+# PyTorch (ROCm) + imajev の依存
+RUN python3 -m venv /opt/venv
+ENV PATH=/opt/venv/bin:$PATH
+RUN pip install --upgrade pip && pip install torch==2.14.0 torchvision==0.29.0 --index-url "${TORCH_INDEX}"
+COPY docker/imajev/requirements.txt /tmp/requirements.txt
+RUN pip install -r /tmp/requirements.txt
+
+# PyTorch 同梱の HSA ランタイム / rocprofiler 登録ライブラリは WSL (DXG) を認識しないため、ROCm 版に差し替える
+RUN TORCH_LIB=$(python -c "import os, importlib.util as u; print(os.path.join(os.path.dirname(u.find_spec('torch').origin), 'lib'))") \
+    && for f in libhsa-runtime64.so librocprofiler-register.so; do \
+         rm -f "$TORCH_LIB/$f" && ln -s "/opt/rocm/lib/$f" "$TORCH_LIB/$f"; \
+       done
+
+# imajev 本体 (固定コミット)
+RUN git clone https://github.com/mohit67890/imajev /opt/imajev \
+    && cd /opt/imajev && git checkout -q "${IMAJEV_COMMIT}" \
+    && pip install --no-deps -e /opt/imajev
+
+COPY docker/imajev/entrypoint.py /opt/entrypoint.py
+
+# ROCPROFILER_REGISTER_ENABLED=0: 同梱の rocprofiler-sdk が WSL に存在しない /sys/class/kfd を前提に abort するのを防ぐ
+ENV HSA_ENABLE_DXG_DETECTION=1 \
+    ROCPROFILER_REGISTER_ENABLED=0 \
+    LD_LIBRARY_PATH=/usr/lib/wsl/lib:/opt/rocm/lib \
+    HF_HOME=/data/hf \
+    TRITON_CACHE_DIR=/data/triton-cache \
+    IMAJEV_DATA=/data \
+    IMAJEV_SIZE=4b \
+    IMAJEV_ROTATIONS=1 \
+    PORT=8765
+
+RUN useradd --create-home --uid 10001 imajev && mkdir -p /data && chown -R imajev:imajev /data /opt/imajev
+USER imajev
+WORKDIR /opt/imajev
+VOLUME ["/data"]
+EXPOSE 8765
+
+HEALTHCHECK --interval=15s --timeout=5s --start-period=30m --retries=3 CMD test -f /tmp/imajev-ready
+CMD ["python", "/opt/entrypoint.py"]

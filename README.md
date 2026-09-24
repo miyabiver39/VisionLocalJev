@@ -76,6 +76,22 @@
 docker compose up -d --build
 ```
 起動後、ブラウザで **`http://localhost:8000`** にアクセスするとダッシュボードが表示されます。
+この構成では判定エンジンは CPU エミュレータ（`DJEV_MODE=embedded`）です。
+
+#### 画像入力つき判定モデル（imajev）も一緒に起動する
+
+[imajev](https://github.com/mohit67890/imajev)（Qwen3.5 + LoRA、TypeSafe System One 互換）を推論サーバーとして同時に起動し、アプリの判定エンジンに接続します。
+
+| GPU | コマンド | 状態 |
+|---|---|---|
+| AMD Radeon（Windows 11 + Docker Desktop / WSL2） | `docker compose -f docker-compose.yml -f docker-compose.imajev-amd.yml up -d --build` | RX 9060 XT 16GB で動作確認済み |
+| NVIDIA（NVIDIA Container Toolkit、ドライバ 580 以降） | `docker compose -f docker-compose.yml -f docker-compose.imajev-nvidia.yml up -d --build` | ビルドのみ確認（実行は未検証） |
+
+- 初回は imajev のベースモデルとアダプタのダウンロード（`IMAJEV_SIZE=4b` で約 9GB）と GPU カーネルのコンパイルがあり、準備完了まで 10〜20 分ほどかかります。アプリは imajev が準備完了（healthy）になってから起動します。
+- モデルとコンパイル済みカーネルはボリューム `imajev-data` に保存され、2 回目以降は数分で起動します。
+- モデルサイズは `IMAJEV_SIZE`（`2b` / `4b` / `9b`）、選択肢の並べ替え回数は `IMAJEV_ROTATIONS`（`1` / `4`）で変更できます（`.env` に書くか、コマンドの前に付けます）。
+- AMD 構成の前提: AMD Adrenalin 26.2.2 以降、Docker Desktop の WSL2 バックエンド。コンテナにはホストの `/dev/dxg` と `/usr/lib/wsl` を渡します。
+- 詳細や実測値は [docs/local_rocm_wsl.md](docs/local_rocm_wsl.md) を参照してください。
 
 > [!WARNING]
 > デフォルトでは認証なしで `0.0.0.0:8000` に公開されます。LAN やインターネットから到達可能な環境では、必ず `AUTH_USERNAME` / `AUTH_PASSWORD` を設定して HTTP Basic 認証を有効化してください（例: `AUTH_USERNAME=admin AUTH_PASSWORD=change-me docker compose up -d`）。
