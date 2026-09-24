@@ -13,6 +13,7 @@ Enables image-based RAG for surveillance and manufacturing inspection:
 import os
 import time
 import base64
+import uuid
 import logging
 from typing import Dict, Any, List, Optional, Tuple
 import numpy as np
@@ -163,7 +164,7 @@ class VisualRAGEngine:
         """Registers a new reference image into the visual database."""
         if ref_id is None:
             prefix = "anom_" if is_anomaly else "norm_"
-            ref_id = f"{prefix}{int(time.time() * 1000) % 1000000}"
+            ref_id = f"{prefix}{uuid.uuid4().hex[:12]}"
 
         embedding = self.extract_embedding(frame)
 
