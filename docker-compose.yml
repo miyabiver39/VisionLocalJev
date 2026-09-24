@@ -4,7 +4,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: ghcr.io/your-org/vision-jev-guard:latest
+    image: ghcr.io/miyabiver39/visionlocaljev:latest
     container_name: vision-guard-platform
     restart: unless-stopped
     ports:
@@ -32,6 +32,8 @@ services:
 
     volumes:
       - ./app/presets:/app/app/presets:ro
+      # YouTube BotGuard対策の cookies.txt を使う場合は以下を有効化
+      # - ./cookies.txt:/app/cookies.txt:ro
 
     # Linuxホストの物理Webカメラをマウントする場合（Windows/Macではコメントアウト推奨）
     # devices:

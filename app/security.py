@@ -18,6 +18,8 @@ from typing import Optional, Tuple
 logger = logging.getLogger("vision_jev.security")
 
 AUTH_REALM = "Vision-Jev Guard"
+# Paths reachable without credentials (container liveness probe only)
+PUBLIC_PATHS = {"/healthz"}
 
 
 def load_credentials() -> Optional[Tuple[str, str]]:
@@ -52,7 +54,11 @@ class BasicAuthMiddleware:
         self.credentials = credentials
 
     async def __call__(self, scope, receive, send):
-        if self.credentials is None or scope["type"] not in ("http", "websocket"):
+        if (
+            self.credentials is None
+            or scope["type"] not in ("http", "websocket")
+            or scope.get("path") in PUBLIC_PATHS
+        ):
             await self.app(scope, receive, send)
             return
 

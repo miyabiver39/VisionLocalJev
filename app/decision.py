@@ -7,17 +7,8 @@ import requests
 import cv2
 import numpy as np
 from typing import Dict, Any, List, Optional
-from pydantic import BaseModel
 
 logger = logging.getLogger("vision_jev.djev")
-
-
-class DJevConfig(BaseModel):
-    mode: str = "embedded"  # embedded | remote
-    remote_url: str = "http://localhost:8080/v1/djev/decide"
-    diffusion_steps: int = 8
-    model_name: str = "google/diffusion-gemma-26b-djev"
-    alert_threshold: float = 0.80
 
 
 class DiffusionGemmaJevEngine:
@@ -469,8 +460,6 @@ class DiffusionGemmaJevEngine:
             true_prob = 0.75
         elif any(w in state_lower for w in ["calm", "clear", "safe", "normal", "safe conditions"]):
             true_prob = 0.02
-
-        return (true_prob >= 0.5), true_prob
 
         return (true_prob >= 0.5), true_prob
 

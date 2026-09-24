@@ -1,10 +1,8 @@
 import time
 import re
 import os
-import json
 import logging
 import requests
-import numpy as np
 from typing import Dict, Any, List, Optional
 from pydantic import BaseModel
 

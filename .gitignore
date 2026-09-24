@@ -43,3 +43,14 @@ scratch/
 scratch_veo_res.json
 app/static/sample_videos/
 *.mp4
+
+# Local virtualenvs
+.venv/
+
+# Secrets / runtime data (never commit YouTube cookies)
+cookies.txt
+youtube_cookies.txt
+app/data/
+
+# Test caches
+.pytest_cache/

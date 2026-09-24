@@ -12,7 +12,6 @@ Enables image-based RAG for surveillance and manufacturing inspection:
 
 import os
 import time
-import json
 import base64
 import logging
 from typing import Dict, Any, List, Optional, Tuple

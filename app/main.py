@@ -17,7 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
-from app.camera import camera_manager, CameraDevice
+from app.camera import camera_manager
 from app.vision import VisionExtractor
 from app.decision import DecisionEngine
 from app.webhook import webhook_dispatcher, WebhookConfig
@@ -376,6 +376,14 @@ async def multi_camera_inference_loop():
         except Exception as e:
             logger.error(f"Error in multi-camera pipeline loop: {e}", exc_info=True)
             await asyncio.sleep(1.0)
+
+
+# ===================== Health Check =====================
+
+@app.get("/healthz")
+async def healthz():
+    """Liveness probe (exempt from Basic auth so container health checks work)."""
+    return {"status": "ok"}
 
 
 # ===================== UI Dashboard Route =====================

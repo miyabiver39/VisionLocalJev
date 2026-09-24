@@ -2,7 +2,8 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Powered by: DiffusionGemma-Jev](https://img.shields.io/badge/Decision_Engine-DiffusionGemma--Jev_(DJev)-purple.svg)](https://github.com/Davipar/djev-dev)
-[![Docker Image](https://img.shields.io/badge/Docker-compose-blue?logo=docker)](https://github.com/)
+[![Docker Image](https://img.shields.io/badge/Docker-compose-blue?logo=docker)](https://github.com/miyabiver39/VisionLocalJev/pkgs/container/visionlocaljev)
+[![Tests](https://github.com/miyabiver39/VisionLocalJev/actions/workflows/tests.yml/badge.svg)](https://github.com/miyabiver39/VisionLocalJev/actions/workflows/tests.yml)
 [![Python 3.12](https://img.shields.io/badge/Python-3.12-brightgreen.svg)](https://www.python.org/)
 
 **Vision-Jev Guard Platform** は、監視カメラ（HLS / RTSP / YouTube / Webカメラ / HTTP JPEG）の映像フレームから、Google DeepMindの **DiffusionGemma** を応用した最新の非自己回帰型決定エンジン **`DiffusionGemma-Jev` (DJev: `Davipar/djev-dev` 互換)** を用いて、型安全（Choice / Score / Noul）かつ超低遅延（~4ms）で状況判定を行うエッジ監視統合基盤です。
@@ -73,6 +74,9 @@ docker compose up -d --build
 ```
 起動後、ブラウザで **`http://localhost:8000`** にアクセスするとダッシュボードが表示されます。
 
+> [!WARNING]
+> デフォルトでは認証なしで `0.0.0.0:8000` に公開されます。LAN やインターネットから到達可能な環境では、必ず `AUTH_USERNAME` / `AUTH_PASSWORD` を設定して HTTP Basic 認証を有効化してください（例: `AUTH_USERNAME=admin AUTH_PASSWORD=change-me docker compose up -d`）。
+
 ### 方法 B: ローカルPython環境での起動
 
 ```bash
@@ -98,7 +102,7 @@ WebUI上の **「+ カメラ追加 (RTSP/JPEG)」** から、様々なストリ�
    - サンプル: `https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8`
 2. **YouTube 監視カメラ / ライブ配信**:
    - YouTube URL（`https://www.youtube.com/watch?v=...`）を入力。
-   - ※ YouTube側のBotGuard遮断（`Sign in to confirm you're not a bot`）が発生する場合は、プロジェクトルートに `cookies.txt` を配置することで認証を通過可能。
+   - ※ YouTube側のBotGuard遮断（`Sign in to confirm you're not a bot`）が発生する場合は、プロジェクトルートに `cookies.txt` を配置することで認証を通過可能（Docker の場合は `docker-compose.yml` の `cookies.txt` マウント行を有効化、または `YOUTUBE_COOKIE_FILE` でパスを指定）。`cookies.txt` は `.gitignore` 済みです。絶対にコミットしないでください。
 3. **RTSP 監視カメラ**:
    - ネットワーク監視カメラのURL（`rtsp://user:pass@camera-ip:554/stream1`）を入力。
 4. **ローカルWebカメラ**:
@@ -106,7 +110,12 @@ WebUI上の **「+ カメラ追加 (RTSP/JPEG)」** から、様々なストリ�
 
 ---
 
-## 6. 単体動作検証スクリプト
+## 6. テスト & 単体動作検証スクリプト
+
+```bash
+pip install -r requirements-dev.txt
+pytest
+```
 
 サーバーを起動せずに、コマンドラインから直接モデルやVisual RAGの動作を検証可能です：
 
@@ -122,12 +131,10 @@ python scripts/test_visual_rag.py
 
 ## 7. ドキュメント & リソース
 
-- **[docs/sample_video_prompts.md](file:///c:/Users/miyab/antigravity/VisionLocalJev/docs/sample_video_prompts.md)**:
+- **[docs/sample_video_prompts.md](docs/sample_video_prompts.md)**:
   - Gemini Omni / Google Veo / Sora 等でテスト用動画（正常・異常の対比）を生成するためのプロンプト集。
-- **[docs/qiita_article.md](file:///c:/Users/miyab/antigravity/VisionLocalJev/docs/qiita_article.md)**:
+- **[docs/qiita_article.md](docs/qiita_article.md)**:
   - Qiita投稿用の詳細技術解説記事（アーキテクチャ・否定文誤認の解消・パフォーマンス実測値）。
-- **[walkthrough.md](file:///C:/Users/miyab/.gemini/antigravity/brain/11d5a1cf-c064-487d-ae62-93840b07b6ef/walkthrough.md)**:
-  - DJevへのリプレイスおよび検証ログ。
 
 ---
 
@@ -142,6 +149,11 @@ python scripts/test_visual_rag.py
 | `DJEV_DIFFUSION_STEPS` | `8` | 離散拡散デノイジングステップ数（2〜32） |
 | `SAMPLE_FPS` | `1.0` | 推論サンプリングFPS（0.1〜10.0） |
 | `ALERT_THRESHOLD` | `0.80` | アラートを発報するスコア/確信度の閾値 |
+| `VISION_MODE` | `detector` | 映像状態抽出モード（`detector`: CPU CV / `mock`: デモ用シナリオ / `vlm`: Moondream2 等） |
+| `RAG_SERVER_URL` | （空） | 外部 RAG サーバー URL。空の場合は内蔵 SOP RAG を使用 |
+| `YOUTUBE_COOKIE_FILE` | （空） | YouTube 用 cookies.txt のパス（`cookies.txt` / `youtube_cookies.txt` も自動検出） |
+| `AUTH_USERNAME` / `AUTH_PASSWORD` | （空） | 両方設定すると全ページ・API・映像・WebSocket に HTTP Basic 認証を適用（`/healthz` を除く） |
+| `MAX_UPLOAD_IMAGE_BYTES` | `10485760` | Visual RAG へ登録する画像の最大サイズ（バイト） |
 
 ---
 
