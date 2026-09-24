@@ -185,16 +185,23 @@ SCENARIOS: List[Dict[str, Any]] = [
 ]
 
 
-def start_generation(prompt: str) -> str:
-    """Submits a video generation job to Veo 3.1 Fast and returns operation name."""
+def start_generation(prompt: str, max_retries: int = 5) -> str:
+    """Submits a video generation job to Veo 3.1 Fast with automatic 429 rate-limit backoff."""
     payload = {"instances": [{"prompt": prompt}]}
-    resp = requests.post(BASE_URL, json=payload, timeout=30)
-    resp.raise_for_status()
-    data = resp.json()
-    return data["name"]
+    for attempt in range(max_retries):
+        resp = requests.post(BASE_URL, json=payload, timeout=30)
+        if resp.status_code == 429:
+            wait_sec = 45 + (attempt * 15)
+            print(f"  [RATE LIMIT 429] Quota exceeded. Waiting {wait_sec}s for quota reset (attempt {attempt+1}/{max_retries})...", flush=True)
+            time.sleep(wait_sec)
+            continue
+        resp.raise_for_status()
+        data = resp.json()
+        return data["name"]
+    raise RuntimeError("Failed to submit generation job after maximum 429 retries.")
 
 
-def poll_and_download(op_name: str, target_path: str, max_wait_sec: int = 180) -> bool:
+def poll_and_download(op_name: str, target_path: str, max_wait_sec: int = 240) -> bool:
     """Polls Veo operation until completion and downloads video MP4."""
     url = f"https://generativelanguage.googleapis.com/v1beta/{op_name}?key={API_KEY}"
     start_time = time.time()
@@ -202,6 +209,10 @@ def poll_and_download(op_name: str, target_path: str, max_wait_sec: int = 180) -
     while time.time() - start_time < max_wait_sec:
         resp = requests.get(url, timeout=30)
         if not resp.ok:
+            if resp.status_code == 429:
+                print("  [WARN] Rate limit on poll, waiting 15s...", flush=True)
+                time.sleep(15)
+                continue
             print(f"  [WARN] Poll HTTP {resp.status_code}, retrying...", flush=True)
             time.sleep(6)
             continue
@@ -260,8 +271,9 @@ def main():
         print(f"\n[{idx}/{len(SCENARIOS)}] Generating Japanese Video: {sc['title']}", flush=True)
         print(f"  ID: {sc['id']} | Output: {out_path}", flush=True)
 
-        if not force_rebuild and os.path.exists(out_path) and os.path.getsize(out_path) > 1000000:
-            print("  [SKIP] Video already exists and is valid size.", flush=True)
+        if not force_rebuild and os.path.exists(out_path) and os.path.getsize(out_path) > 500000:
+            size_mb = os.path.getsize(out_path) / (1024 * 1024)
+            print(f"  [SKIP] Video already exists and is valid size ({size_mb:.2f} MB).", flush=True)
             results.append({"id": sc["id"], "status": "EXISTS", "path": out_path})
             continue
 
@@ -274,8 +286,9 @@ def main():
             print(f"  [EXCEPTION] {e}", flush=True)
             results.append({"id": sc["id"], "status": "ERROR", "error": str(e)})
 
-        # Pause between jobs to respect API quota
-        time.sleep(4)
+        # 25-second cooldown between jobs to avoid 429 quota spikes
+        print("  Cooling down 25s for API quota...", flush=True)
+        time.sleep(25)
 
     print("\n" + "=" * 70, flush=True)
     print("Batch Generation Summary (Japan CCTV):", flush=True)
