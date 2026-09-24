@@ -51,3 +51,34 @@ def test_match_frame_returns_bool_anomaly_flag():
     frame = np.zeros((240, 320, 3), dtype=np.uint8)
     res = visual_rag_engine.match_frame(frame, "security")
     assert isinstance(res["is_anomalous"], bool)
+
+
+PRESETS = ["security", "fire_disaster", "nursing_care", "river_flood", "factory_safety", "railway_platform"]
+
+
+@pytest.mark.parametrize("category", PRESETS)
+def test_unrelated_synthetic_frame_is_not_visual_anomaly(category):
+    """Regression for #13: the default synthetic test pattern must not alert."""
+    from app.camera import CameraDevice
+    frame = CameraDevice("t", "t", "synthetic", "synthetic")._generate_synthetic_frame()
+    assert visual_rag_engine.match_frame(frame, category)["is_anomalous"] is False
+
+
+def _decode_thumbnail(ref):
+    import base64
+    import cv2
+    raw = base64.b64decode(ref.image_base64.split(",", 1)[1])
+    return cv2.imdecode(np.frombuffer(raw, np.uint8), cv2.IMREAD_COLOR)
+
+
+@pytest.mark.parametrize("ref_id", list(visual_rag_engine.references))
+def test_seed_reference_images_classify_as_their_own_label(ref_id):
+    ref = visual_rag_engine.references[ref_id]
+    res = visual_rag_engine.match_frame(_decode_thumbnail(ref), ref.category)
+    assert res["is_anomalous"] is ref.is_anomaly
+
+
+def test_similarity_is_raw_cosine_in_unit_range():
+    frame = np.random.default_rng(3).integers(0, 255, (180, 320, 3), dtype=np.uint8)
+    for m in visual_rag_engine.match_frame(frame, None, top_k=50)["matches"]:
+        assert 0.0 <= m["similarity"] <= 1.0

@@ -66,6 +66,12 @@ class VisualRAGEngine:
     and computes cosine similarity in <2 ms on CPU.
     """
 
+    # Embeddings are non-negative histograms, so raw cosine similarity is already in [0, 1].
+    # Anomaly decision thresholds (see match_frame):
+    ANOMALY_SCORE_THRESHOLD = 0.70   # blended anomaly score required for an alert
+    STRONG_MATCH_SIMILARITY = 0.90   # nearest anomaly example must be at least this similar ...
+    ANOMALY_MARGIN = 0.05            # ... and this much closer than the best normal baseline
+
     def __init__(self, storage_dir: str = "app/data/visual_rag"):
         self.storage_dir = storage_dir
         os.makedirs(self.storage_dir, exist_ok=True)
@@ -215,10 +221,9 @@ class VisualRAGEngine:
             if category and ref.category != category and ref.category != "default":
                 continue
 
-            # Cosine similarity: dot product of L2-normalized vectors
-            sim = float(np.dot(query_vec, ref.embedding))
-            # Clip between 0.0 and 1.0
-            sim = max(0.0, min(1.0, (sim + 1.0) / 2.0))
+            # Cosine similarity: dot product of L2-normalized, non-negative vectors -> [0, 1].
+            # (Do not rescale with (sim + 1) / 2: that squeezes everything into [0.5, 1].)
+            sim = max(0.0, min(1.0, float(np.dot(query_vec, ref.embedding))))
 
             results.append({
                 "ref_id": ref.ref_id,
@@ -249,13 +254,25 @@ class VisualRAGEngine:
         anomaly_score = max_anom_sim * 0.7 + (1.0 - max_norm_sim) * 0.3
         anomaly_score = round(max(0.0, min(1.0, anomaly_score)), 3)
 
+        # An anomaly must be both close to an incident example and clearly closer to it than
+        # to any normal baseline; otherwise unrelated scenes would match whichever example is nearest.
+        margin = max_anom_sim - (max(normal_sims) if normal_sims else 0.0)
+        strong_anomaly_match = bool(
+            top_match
+            and top_match["is_anomaly"]
+            and top_match["similarity"] >= self.STRONG_MATCH_SIMILARITY
+        )
+        is_anomalous = margin >= self.ANOMALY_MARGIN and (
+            anomaly_score >= self.ANOMALY_SCORE_THRESHOLD or strong_anomaly_match
+        )
+
         latency_ms = (time.perf_counter() - t0) * 1000
 
         return {
             "top_match": top_match,
             "similarity": top_match["similarity"] if top_match else 0.0,
             "anomaly_score": anomaly_score,
-            "is_anomalous": bool(anomaly_score >= 0.70 or (top_match and top_match["is_anomaly"] and top_match["similarity"] > 0.80)),
+            "is_anomalous": bool(is_anomalous),
             "matches": top_k_results,
             "latency_ms": round(latency_ms, 2)
         }
