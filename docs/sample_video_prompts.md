@@ -9,10 +9,10 @@
 
 ---
 
-## 共通の撮影・レンダリングスタイル指定（Style Prompt）
-プロンプト末尾に付与することで、リアルな監視カメラ（CCTV）の質感を高めます：
+## 共通の撮影・レンダリングスタイル指定（Japanese CCTV Style Prompt）
+プロンプト末尾に必ず付与することで、**「日本国内の舞台」「日本人」「日本語の看板・標識」「日本の監視カメラの画角」**を強力に条件付けします：
 ```text
-Style parameters: High-angle static surveillance camera (CCTV footage), wide-angle lens with subtle barrel distortion, authentic fixed security perspective, realistic lighting and shadows, CCTV digital timestamp and camera label overlay in the upper corner, 1080p 24fps surveillance video quality, no cinematic handheld motion.
+Authentic Japanese surveillance camera footage set in Japan. Realistic Japanese domestic architecture, Japanese text signage and warning banners in kanji on walls, authentic Japanese people. High-angle fixed Japanese CCTV security camera perspective, crisp 1080p 24fps surveillance video quality, genuine Japan setting.
 ```
 
 ---
@@ -22,16 +22,16 @@ Style parameters: High-angle static surveillance camera (CCTV footage), wide-ang
 ### 1-A. 【正常シーン】穏やかな就寝・室内安静（Choice: `normal_rest`, Score: `0.04`, Alert: `False`）
 - **英語プロンプト (Gemini Omni / Veo用)**:
   ```text
-  A realistic high-angle security camera view of a clean, softly lit nursing home private bedroom at night. An elderly person is sleeping peacefully and motionless under blankets on a low nursing bed with side rails raised. Soft amber nightlight in the corner of the room. No sudden movements, serene and safe atmosphere. Static CCTV camera footage with green timestamp in top-left corner.
+  A high-angle indoor surveillance camera view of a modern Japanese nursing care home private bedroom at night in Tokyo, Japan. An elderly Japanese resident in their 80s is resting peacefully and motionless under a warm futon blanket on a low Japanese nursing bed with wooden side rails. Subtle ambient nightlight, authentic Japanese interior with tatami-toned flooring and a Japanese emergency nurse call button unit on the wall. Authentic Japanese surveillance camera footage set in Japan, peaceful Japanese domestic eldercare setting.
   ```
-- **日本語概要**: 介護居室の夜間定点監視。利用者がベッド柵の中で毛布をかけて穏やかに就寝しており、室内は静かで安全。
+- **日本語概要**: 日本の介護施設個室。80代の日本人利用者が低床介護ベッド上で布団をかけて静かに安らかに就寝している夜間定点監視映像。
 
 ### 1-B. 【検知シーン】ベッドサイドでの転倒・床倒臥（Choice: `fall_detected`, Score: `0.94`, Alert: `True`）
 - **英語プロンプト (Gemini Omni / Veo用)**:
   ```text
-  A high-angle nursing home indoor CCTV camera capturing an elderly resident attempting to stand up from the bed, losing balance, tripping, and falling heavily onto the wooden floor near the bedside. The resident remains lying motionless on the floor beside the slippers. Realistic slow movement of the fall, natural indoor fluorescent lighting, security camera angle looking down from the ceiling corner, authentic surveillance footage.
+  A high-angle Japanese indoor nursing home room camera in Japan capturing an elderly Japanese person attempting to get up from bed, losing balance, and falling onto the wooden floor near the bedside slippers. The elderly Japanese resident remains lying motionless on the floor. Indoor fluorescent lighting, Japanese wall posters and nurse call unit, authentic domestic Japanese eldercare surveillance footage.
   ```
-- **日本語概要**: 高齢者がベッドから立ち上がろうとしてバランスを崩し、床に倒れ込んで動けなくなっている転倒の瞬間。
+- **日本語概要**: 日本の介護老人保健施設。日本人高齢者がベッドからスリッパを履いて立ち上がろうとして足元を取られ、床に倒れ込んで動けなくなっている転倒の瞬間。
 
 ---
 
@@ -40,16 +40,16 @@ Style parameters: High-angle static surveillance camera (CCTV footage), wide-ang
 ### 2-A. 【正常シーン】平常時の清流・低水位（Choice: `normal_flow`, Score: `0.04`, Alert: `False`）
 - **英語プロンプト (Gemini Omni / Veo用)**:
   ```text
-  A fixed riverbank surveillance camera overlooking a calm rural river on a clear sunny day. The water level is low and flowing smoothly over riverbed stones. Visible dry concrete embankments, green grass along the river trail, and an empty water gauge pole clearly showing normal baseline water levels. High-angle static CCTV framing with crisp daytime lighting.
+  A fixed Japanese riverbank surveillance CCTV camera overlooking a calm rural river in Japan on a clear sunny morning. Low water level flowing peacefully over stones, visible concrete embankment dykes, green grass on riverbank, and a Japanese river measurement staff marked with clear Japanese kanji characters showing safe water level. Crisp natural daytime lighting, authentic Japanese infrastructure CCTV.
   ```
-- **日本語概要**: 晴天時の堤防監視カメラ。水量は穏やかで水位標は基準以下。川原や堤防斜面が完全に露出している平常映像。
+- **日本語概要**: 晴天時の日本の河川堤防監視カメラ。水量は穏やかで日本の漢字表記の水位標柱は基準以下。土手や護岸が露出している平常映像。
 
-### 2-B. 【検知シーン】越水・堤防決壊と濁流氾濫（Choice: `overflow_breach`, Score: `0.95`, Alert: `True`）
+### 2-B. 【検知シーン】豪雨激流・高水位危険標検知（Choice: `overflow_breach`, Score: `0.95`, Alert: `True`）
 - **英語プロンプト (Gemini Omni / Veo用)**:
   ```text
-  A stormy river surveillance camera during heavy torrential rainfall. The river has swollen dramatically, turned into a rapid muddy brown torrent, and is overflowing the concrete dyke embankments. Muddy floodwaters inundate the surrounding paved road and park benches. Debris and tree branches rushing past in turbulent currents. Dramatic emergency flood situation from a fixed elevated CCTV perspective.
+  An authentic Japanese river disaster prevention surveillance camera during heavy rainfall in Japan. The river channel carries a very high, swift water current with surface ripples, reaching the red danger indicator mark on a concrete measurement pillar marked with Japanese kanji text. Overcast cloudy Japanese landscape, fast flowing river stream, scientific water monitoring in Japan. Authentic fixed Japanese CCTV footage.
   ```
-- **日本語概要**: 豪雨時の河川激流。茶色の濁流がコンクリート堤防を越水し、道路や遊歩道へと冠水・氾濫している緊急水害映像。
+- **日本語概要**: 日本の河川防災定点カメラ。梅雨の豪雨の中、水流が急激に増水し、茶色い激流がコンクリート護岸の赤い危険水位標の直前まで達している高切迫度シーン。
 
 ---
 
@@ -58,34 +58,34 @@ Style parameters: High-angle static surveillance camera (CCTV footage), wide-ang
 ### 3-A. 【正常シーン】通用口の正常歩行・通過（Choice: `normal_passing`, Score: `0.04`, Alert: `False`）
 - **英語プロンプト (Gemini Omni / Veo用)**:
   ```text
-  A high-angle commercial building entrance security camera. An employee dressed in smart business attire walks casually through the well-lit entrance corridor, holding an employee badge and entering through the automatic glass door. Clean, routine foot traffic, daylight coming through windows, calm and secure corporate environment.
+  A high-angle Japanese corporate building entrance security camera in Tokyo, Japan. A Japanese businessman dressed in a dark business suit walks through the well-lit entrance corridor, holding an employee badge and entering through the automatic glass door. Clean Japanese office interior, Japanese wall signage reading 関係者以外立入禁止 in kanji, routine foot traffic, authentic Japanese daytime CCTV.
   ```
-- **日本語概要**: ビル入口のセキュリティカメラ。社員が身分証を持って普通に自動ドアを通過して入館する日常光景。
+- **日本語概要**: 日本のオフィスビル通用口。ビジネススーツを着た日本人社員が社員証をかざして自動ドアを通過する日常の安全光景。
 
 ### 3-B. 【検知シーン】外周フェンス乗り越え・不法侵入（Choice: `trespassing`, Score: `0.92`, Alert: `True`）
 - **英語プロンプト (Gemini Omni / Veo用)**:
   ```text
-  Night vision infrared security camera capturing an unauthorized person wearing a dark hoodie and gloves climbing aggressively over an 8-foot chain-link perimeter fence topped with barbed wire. The person leaps down into the restricted facility courtyard and darts into building shadows. High contrast night vision monochrome CCTV footage, slight motion blur, urgent security intrusion scenario.
+  A night vision monochrome surveillance camera overlooking a Japanese industrial facility perimeter chain-link fence in Japan. An unauthorized person wearing a dark hoodie and gloves climbing over the wire fence topped with barbed wire and dropping into the facility shadows. Japanese warning sign reading 立入禁止 防犯カメラ作動中 visible on the fence, high-contrast night vision Japanese CCTV security footage.
   ```
-- **日本語概要**: 夜間赤外線カメラ。暗い服の人物が工場の外周フェンスをよじ登り、敷地内へ飛び降りて侵入する瞬間。
+- **日本語概要**: 日本の工場地帯の夜間赤外線カメラ。黒いフードを着た人物が外周フェンスをよじ登り敷地内へ侵入する瞬間。「立入禁止・防犯カメラ作動中」の日本語看板。
 
 ---
 
 ## 4. 火災・防災監視 (`fire_disaster`)
 
-### 4-A. 【正常シーン】給湯室の湯気・水蒸気（Choice: `steam_vapor` or `none`, Score: `0.04`, Alert: `False`）
+### 4-A. 【正常シーン】給湯室の白い湯気（Choice: `steam_vapor` or `none`, Score: `0.04`, Alert: `False`）
 - **英語プロンプト (Gemini Omni / Veo用)**:
   ```text
-  A security camera view of an industrial office tea room/kitchen. A kettle on an induction stove boils, releasing gentle, translucent white water steam into the air above. No flames, no black smoke, bright fluorescent overhead lighting, stainless steel counters. Safe and normal kitchen scene without fire hazards.
+  An indoor security camera view of a Japanese office tea room (給湯室) in Tokyo, Japan. A stainless kettle on an induction stove boils, releasing gentle translucent white water steam into the air above. No flames, no smoke, bright fluorescent overhead lighting, Japanese warning stickers reading 火気厳禁 on the stainless steel counter, authentic Japanese workplace interior without fire hazards.
   ```
-- **日本語概要**: 給湯室でやかんから白い湯気が立ち上っている様子。黒煙や炎はなく、誤検知防止のテストに最適。
+- **日本語概要**: 日本のオフィスの給湯室。IHコンロの上でステンレスやかんから白い湯気が立ち上っている日常の光景（火災誤検知防止テスト用）。
 
 ### 4-B. 【検知シーン】電気室の開放火炎と黒煙（Choice: `open_flame`, Score: `0.96`, Alert: `True`）
 - **英語プロンプト (Gemini Omni / Veo用)**:
   ```text
-  Indoor CCTV camera inside a factory electrical distribution room. Dense, billowing black smoke rapidly rises from a metal control panel cabinet, followed by intense orange flickering open flames erupting from the top vents of the machine. Smoke accumulates across the ceiling creating a hazing layer. Emergency industrial fire breakout, static high-angle camera framing.
+  An authentic industrial CCTV camera inside a Japanese factory electrical distribution switchboard room in Japan. Dense billowing dark grey and black smoke rapidly rises from a metal control panel cabinet, followed by intense orange flickering open flames erupting from the top vents. Yellow Japanese warning sign reading 高圧受電設備 危険 reflecting the firelight, emergency industrial fire scenario from a fixed elevated Japanese CCTV.
   ```
-- **日本語概要**: 工場電気室の制御盤から濃い黒煙が噴き出し、激しい炎が立ち上る火災発生の瞬間。
+- **日本語概要**: 日本の工場配電盤室。制御盤から濃い黒煙と激しい炎が噴き出し、日本語の「高圧受電設備・危険」の黄色い看板が照らされている火災発生シーン。
 
 ---
 
@@ -94,16 +94,16 @@ Style parameters: High-angle static surveillance camera (CCTV footage), wide-ang
 ### 5-A. 【正常シーン】安全保護具着用の適正作業（Choice: `safe_operation`, Score: `0.04`, Alert: `False`）
 - **英語プロンプト (Gemini Omni / Veo用)**:
   ```text
-  High-ceiling factory manufacturing floor surveillance camera. Two industrial workers wearing yellow hardhats, high-visibility neon reflective safety vests, and protective boots are walking within painted green pedestrian safety walkways. Machining centers operating behind clear safety barriers in background. Compliant occupational safety environment.
+  A high-ceiling Japanese manufacturing factory floor surveillance camera in Japan. Two Japanese factory workers wearing yellow hardhats and high-visibility neon reflective safety vests walk strictly within a painted green safety pathway. Clear Japanese green cross banner reading 安全第一 on the wall, industrial machinery operating cleanly in background, compliant Japanese occupational safety environment.
   ```
-- **日本語概要**: 工場内の定点カメラ。ヘルメットと反射ベストを着用した作業員が安全通路を歩行し、規定通り作業している様子。
+- **日本語概要**: 日本の製造工場。黄色いヘルメットを被った日本人作業員が緑色の安全通路を整然と歩行。「安全第一」の緑十字看板。
 
 ### 5-B. 【検知シーン】危険区域内での作業員倒臥・意識喪失（Choice: `worker_down`, Score: `0.96`, Alert: `True`）
 - **英語プロンプト (Gemini Omni / Veo用)**:
   ```text
-  Surveillance camera overlooking a warehouse heavy machinery forklift loading zone marked with yellow hazard stripes. A worker in overalls suddenly stumbles and collapses unconscious onto the concrete floor inside the active forklift path, remaining completely still. Yellow rotating emergency warning beacon reflecting nearby. Urgent industrial accident scene.
+  A Japanese factory surveillance camera in Japan capturing an emergency workplace drill. A Japanese worker in factory uniform lies motionless on the concrete floor inside a yellow hazard diagonal line near automated equipment. Japanese safety poster reading 整理整頓 on the wall, a colleague rushing in background to press the red emergency stop button, authentic Japanese industrial incident drill.
   ```
-- **日本語概要**: 重機搬送エリアの床に作業員が突然倒れ込み、意識を失って動かなくなっている労災緊急事態。
+- **日本語概要**: 日本の工場。日本人作業員が危険エリア内で倒れて動かなくなっており、同僚が非常停止ボタンに駆け寄る労災緊急事態。
 
 ---
 
@@ -112,16 +112,16 @@ Style parameters: High-angle static surveillance camera (CCTV footage), wide-ang
 ### 6-A. 【正常シーン】点字ブロック内側での安全待機（Choice: `safe_waiting`, Score: `0.04`, Alert: `False`）
 - **英語プロンプト (Gemini Omni / Veo用)**:
   ```text
-  Railway platform ceiling-mounted surveillance camera looking down at passenger boarding area. Commuters standing neatly behind the tactile yellow braille line waiting for a train. Automatic half-height platform screen doors in front of the tracks. Calm morning commute, natural platform lighting, completely orderly and safe waiting conditions.
+  A high-angle Japanese railway station platform security CCTV camera in Tokyo, Japan. Japanese commuters in dark business attire standing neatly in orderly lines behind the yellow textured braille safety line, waiting for a train. Automatic platform screen doors, Japanese station name signs overhead, clean orderly morning Japanese train platform footage.
   ```
-- **日本語概要**: 駅ホームカメラ。乗客が黄色い点字ブロックの内側で整然と列車を待っている安全な朝のホーム風景。
+- **日本語概要**: 日本の駅ホーム。スーツ姿の日本の通勤客が黄色い点字ブロックの内側で整然と整列乗車を待っている安全な朝のホーム風景。
 
 ### 6-B. 【検知シーン】ホーム端から線路への転落（Choice: `track_fall`, Score: `0.98`, Alert: `True`）
 - **英語プロンプト (Gemini Omni / Veo用)**:
   ```text
-  High-angle security camera on a train station platform. A passenger stumbles past the yellow safety line and accidentally falls off the platform edge down onto the ballast and railway tracks below. The person struggles to get up between the steel rails as overhead station lights glare. Extreme railway hazard scenario captured on static CCTV.
+  A Japanese train station platform surveillance camera in Japan. A passenger stumbles past the yellow braille line and falls off the platform edge down onto the track gravel area between the steel rails. Red emergency warning indicator flashing on the Japanese platform pillar labeled 非常ボタン, authentic Japanese railway security camera perspective.
   ```
-- **日本語概要**: 乗客がバランスを崩してホームから線路へ転落し、軌道敷内で倒れ込んでいる直前非常事態。
+- **日本語概要**: 日本の駅ホーム。乗客がホームから線路へ転落し、軌道敷内で倒れ込んでいる。「非常ボタン」の赤色警告ランプが点滅。
 
 ---
 

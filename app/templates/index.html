@@ -406,13 +406,13 @@
                         </div>
                         <select onchange="if(this.value){const d=JSON.parse(this.value);setSampleUrl(d.url, 'youtube', d.name, d.preset);}" class="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-slate-200 text-xs focus:outline-none cursor-pointer">
                             <option value="">▼ アップロード済み検証動画を選択（URL・名前・プリセット自動入力）</option>
-                            <option value='{"url":"https://www.youtube.com/watch?v=IS98_Tzwl3c","name":"検証動画 #1 (防犯・徘徊)","preset":"security"}'>📹 #1: IS98_Tzwl3c (防犯・立ち入り監視)</option>
-                            <option value='{"url":"https://www.youtube.com/watch?v=NKHab4poTok","name":"検証動画 #2 (火災・煙)","preset":"fire_disaster"}'>📹 #2: NKHab4poTok (火災・防災監視)</option>
-                            <option value='{"url":"https://www.youtube.com/watch?v=lYqbEQ93RBw","name":"検証動画 #3 (介護・転倒)","preset":"nursing_care"}'>📹 #3: lYqbEQ93RBw (介護施設・見守り)</option>
-                            <option value='{"url":"https://www.youtube.com/watch?v=CRwce8_7t_o","name":"検証動画 #4 (河川・水害)","preset":"river_flood"}'>📹 #4: CRwce8_7t_o (河川監視・水害警戒)</option>
-                            <option value='{"url":"https://www.youtube.com/watch?v=DW0F_5YUEVs","name":"検証動画 #5 (工場・労災)","preset":"factory_safety"}'>📹 #5: DW0F_5YUEVs (工場・労働安全)</option>
-                            <option value='{"url":"https://www.youtube.com/watch?v=Q3Aj3ynUyk0","name":"検証動画 #6 (駅ホーム転落)","preset":"railway_platform"}'>📹 #6: Q3Aj3ynUyk0 (駅ホーム・鉄道安全)</option>
-                            <option value='{"url":"https://www.youtube.com/watch?v=hC214WzegXw","name":"検証動画 #7 (外周フェンス)","preset":"security"}'>📹 #7: hC214WzegXw (防犯・立ち入り監視)</option>
+                            <option value='{"url":"https://www.youtube.com/watch?v=IS98_Tzwl3c","name":"【検知】高齢者ベッド転倒","preset":"nursing_care"}'>🚨 介護見守り [検知]: ベッドサイド転倒 (IS98_Tzwl3c)</option>
+                            <option value='{"url":"https://www.youtube.com/watch?v=NKHab4poTok","name":"【正常】居室安静就寝","preset":"nursing_care"}'>✅ 介護見守り [正常]: 居室安静就寝 (NKHab4poTok)</option>
+                            <option value='{"url":"https://www.youtube.com/watch?v=lYqbEQ93RBw","name":"【正常】平常時清流水位","preset":"river_flood"}'>✅ 河川監視 [正常]: 平常清流・低水位 (lYqbEQ93RBw)</option>
+                            <option value='{"url":"https://www.youtube.com/watch?v=CRwce8_7t_o","name":"【検知】外周フェンス侵入","preset":"security"}'>🚨 防犯監視 [検知]: 外周フェンス乗り越え侵入 (CRwce8_7t_o)</option>
+                            <option value='{"url":"https://www.youtube.com/watch?v=DW0F_5YUEVs","name":"【検知】電気室開放火炎・黒煙","preset":"fire_disaster"}'>🚨 火災防災 [検知]: 電気室開放火炎・黒煙 (DW0F_5YUEVs)</option>
+                            <option value='{"url":"https://www.youtube.com/watch?v=Q3Aj3ynUyk0","name":"【正常】給湯室湯気","preset":"fire_disaster"}'>✅ 火災防災 [正常]: 給湯室の白い湯気 (Q3Aj3ynUyk0)</option>
+                            <option value='{"url":"https://www.youtube.com/watch?v=hC214WzegXw","name":"【正常】通用口正常歩行","preset":"security"}'>✅ 防犯監視 [正常]: 通用口正常通過 (hC214WzegXw)</option>
                         </select>
                     </div>
                 </div>
