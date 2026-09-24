@@ -40,3 +40,6 @@ Thumbs.db
 # Project logs and tests
 *.log
 scratch/
+scratch_veo_res.json
+app/static/sample_videos/
+*.mp4

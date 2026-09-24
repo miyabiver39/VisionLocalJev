@@ -490,17 +490,19 @@ async function updateCameraPreset(camId, presetId) {
 
 // ===================== Modals & Actions =====================
 
-function setSampleUrl(url, type, name) {
+function setSampleUrl(url, type, name, preset = null) {
     const urlInput = document.getElementById("add-cam-url");
     const typeSelect = document.getElementById("add-cam-type");
     const nameInput = document.getElementById("add-cam-name");
     const idInput = document.getElementById("add-cam-id");
     const fpsInput = document.getElementById("add-cam-fps");
+    const presetSelect = document.getElementById("add-cam-preset");
 
     if (urlInput) urlInput.value = url;
     if (typeSelect) typeSelect.value = type;
     if (nameInput) nameInput.value = name;
     if (fpsInput) fpsInput.value = "1.0";
+    if (preset && presetSelect) presetSelect.value = preset;
     if (idInput && !idInput.value) {
         const prefix = type === "hls" ? "hls_" : (type === "youtube" ? "yt_" : "cam_");
         idInput.value = prefix + Math.floor(Math.random() * 900 + 100);
