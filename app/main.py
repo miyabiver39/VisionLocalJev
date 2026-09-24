@@ -3,7 +3,8 @@ import asyncio
 import logging
 import json
 import time
-from typing import Set, Optional, Dict, Any, List
+from collections import deque
+from typing import Set, Optional, Dict, Any, List, Deque
 from contextlib import asynccontextmanager
 
 import base64
@@ -49,7 +50,8 @@ active_connections: Set[WebSocket] = set()
 pipeline_task: Optional[asyncio.Task] = None
 
 # Recent alert event log (in-memory, up to 100 entries)
-recent_event_log: List[Dict[str, Any]] = []
+MAX_EVENT_LOG = 100
+recent_event_log: Deque[Dict[str, Any]] = deque(maxlen=MAX_EVENT_LOG)
 
 # Manual scenario freeze / override state: camera_id -> {state, preset_id, expires_at}
 scenario_overrides: Dict[str, Dict[str, Any]] = {}
@@ -266,7 +268,7 @@ async def multi_camera_inference_loop():
                 None, visual_rag_engine.match_frame, frame, preset_id
             )
             # If Visual RAG found a high-confidence anomaly reference with linked SOP, prioritize it
-            if visual_rag_res.get("is_anomalous") and visual_rag_res.get("top_match", {}).get("sop_id"):
+            if visual_rag_res.get("is_anomalous") and (visual_rag_res.get("top_match") or {}).get("sop_id"):
                 linked_sop_id = visual_rag_res["top_match"]["sop_id"]
                 linked_sop = rag_engine.documents.get(linked_sop_id)
                 if linked_sop:
@@ -276,7 +278,17 @@ async def multi_camera_inference_loop():
                     rag_res["relevance_score"] = visual_rag_res["similarity"]
 
             # 4. Metrics & Telemetry Update
-            is_alert = decision_res["is_alert"] or visual_rag_res.get("is_anomalous", False)
+            visual_anomalous = bool(visual_rag_res.get("is_anomalous", False))
+            is_alert = decision_res["is_alert"] or visual_anomalous
+            alert_score = decision_res["score"]
+            alert_reason = ""
+            if decision_res["is_alert"]:
+                alert_reason = decision_res["alert_reason"]
+            elif visual_anomalous:
+                top_title = (visual_rag_res.get("top_match") or {}).get("title", "")
+                alert_reason = f"Visual Anomaly: {top_title}" if top_title else "Visual Anomaly detected"
+                # Visual-only alerts carry the anomaly score so webhook min_score filters don't drop them
+                alert_score = max(alert_score, float(visual_rag_res.get("anomaly_score", 0.0)))
             metrics_tracker.update_inference_telemetry(
                 vision_latency, decision_latency, rag_latency, is_alert
             )
@@ -306,7 +318,7 @@ async def multi_camera_inference_loop():
                     "decisions": decision_res["decisions"],
                     "score": decision_res["score"],
                     "is_alert": is_alert,
-                    "alert_reason": decision_res["alert_reason"] or ("Visual Anomaly: " + (visual_rag_res.get("top_match", {}).get("title", ""))),
+                    "alert_reason": alert_reason,
                     "alert_threshold": decision_res["alert_threshold"],
                     "djev": decision_res.get("djev", {})
                 },
@@ -333,19 +345,17 @@ async def multi_camera_inference_loop():
                     "camera_id": cam_id,
                     "camera_name": cam_name,
                     "state": state_text,
-                    "score": decision_res["score"],
-                    "confidence": decision_res["score"],
-                    "alert_reason": decision_res["alert_reason"],
+                    "score": alert_score,
+                    "confidence": alert_score,
+                    "alert_reason": alert_reason,
                     "timestamp": time_now,
                     "time_str": time_str,
                     "sop_action": sop_action
                 }
                 webhook_dispatcher.dispatch_alert_async(alert_payload)
 
-                # Record in-memory event log
+                # Record in-memory event log (bounded by deque maxlen)
                 recent_event_log.append(alert_payload)
-                if len(recent_event_log) > 100:
-                    recent_event_log.pop(0)
 
             # 7. Broadcast Telemetry to connected WebUI clients
             await broadcast_ws(composite_result)

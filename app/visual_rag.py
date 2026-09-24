@@ -256,7 +256,7 @@ class VisualRAGEngine:
             "top_match": top_match,
             "similarity": top_match["similarity"] if top_match else 0.0,
             "anomaly_score": anomaly_score,
-            "is_anomalous": (anomaly_score >= 0.70 or (top_match and top_match["is_anomaly"] and top_match["similarity"] > 0.80)),
+            "is_anomalous": bool(anomaly_score >= 0.70 or (top_match and top_match["is_anomaly"] and top_match["similarity"] > 0.80)),
             "matches": top_k_results,
             "latency_ms": round(latency_ms, 2)
         }
